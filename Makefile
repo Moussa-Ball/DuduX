@@ -58,40 +58,10 @@ help:
 	@echo "  1. make train    # Train the model"
 	@echo "  2. make infer    # Run interactive inference"
 
-# Performance test
-perf: $(TRAINING_TARGET)
-	@echo "📊 Performance test..."
-	time ./$(TRAINING_TARGET)
-
-# Check GPU
-check-gpu:
-	@echo "🔍 GPU Information:"
-	nvidia-smi --query-gpu=name,memory.total,compute_cap --format=csv,noheader,nounits
-
-# Debug build
-debug: NVCC_FLAGS := -g -G -arch=sm_75
-debug: $(TRAINING_TARGET)
-	@echo "🐛 Debug build complete"
-
-# Clean compiled files
+# Clean
 clean:
-	@echo "🧹 Cleaning compiled files..."
-	rm -f $(TRAINING_TARGET) $(INFERENCE_TARGET) *.o
-	@echo "✅ Clean completed"
-
-# Rebuild everything
-rebuild: clean all
-
-.PHONY: all clean train infer help rebuild perf check-gpu debug
-	@echo "📋 Available targets:"
-	@echo "  make          - Build the CUDA neural network"
-	@echo "  make run      - Build and run simulation"
-	@echo "  make perf     - Performance benchmark"
-	@echo "  make debug    - Debug build"
-	@echo "  make check-gpu- Check GPU info"
-	@echo "  make clean    - Clean build files"
-	@echo "  make help     - Show this help"
-	@echo ""
-	@echo "🚀 Quick start: make run"
+	@echo "🧹 Cleaning..."
+	rm -f $(TARGET) *.o
+	@echo "✅ Clean complete"
 
 .PHONY: all run perf debug check-gpu clean help

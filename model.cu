@@ -132,6 +132,14 @@ typedef struct {
     int pattern_length;
 } SyntacticPattern;
 
+// Dialogue pattern structure for conversational learning
+typedef struct {
+    char input_pattern[256];
+    char response_pattern[256];
+    float confidence;
+    int usage_count;
+} DialoguePattern;
+
 //========================== MEMORY STRUCTURES ==========================
 
 struct EpisodicMemory {
@@ -962,6 +970,7 @@ private:
     MemoryEpisode* d_episodes_;
     SyntacticPattern* d_syntax_patterns_;
     SemanticCluster* d_semantic_clusters_;
+    DialoguePattern* d_dialogue_patterns_;  // Device dialogue patterns
     
     // Layer processing arrays
     float** d_layer_activations_;
@@ -977,16 +986,18 @@ private:
     float* h_output_spikes_;
     SyntacticPattern* h_syntax_patterns_;
     SemanticCluster* h_semantic_clusters_;
+    DialoguePattern* h_dialogue_patterns_;  // Host dialogue patterns
     
     // Processing state
     int current_episode_;
     int vocabulary_size_;
     char vocabulary_[MAX_VOCABULARY][32];
+    int n_dialogue_patterns_;  // Number of dialogue patterns
     
 public:
     BioFaithfulCudaNNN(int n_neurons, int* hierarchy_sizes, int n_layers) 
         : n_neurons_(n_neurons), n_layers_(n_layers), global_time_(0.0f), 
-          global_energy_budget_(1000.0f), glucose_level_(1.0f), current_episode_(0), vocabulary_size_(0) {
+          global_energy_budget_(1000.0f), glucose_level_(1.0f), current_episode_(0), vocabulary_size_(0), n_dialogue_patterns_(0) {
         
         printf("🚀 Initializing Advanced Bio-Faithful CUDA Neural Network...\n");
         printf("🧠 Neurons: %d, Layers: %d\n", n_neurons_, n_layers_);
@@ -1020,6 +1031,7 @@ public:
         cudaFree(d_episodes_);
         cudaFree(d_syntax_patterns_);
         cudaFree(d_semantic_clusters_);
+        cudaFree(d_dialogue_patterns_);
         cudaFree(d_prediction_errors_);
         
         // Free layer arrays
@@ -1035,6 +1047,7 @@ public:
         free(h_output_spikes_);
         free(h_syntax_patterns_);
         free(h_semantic_clusters_);
+        free(h_dialogue_patterns_);
         free(layer_sizes_);
     }
     
@@ -1051,6 +1064,7 @@ public:
         size_t episodes_size = 1000 * sizeof(MemoryEpisode);  // Max 1000 episodes
         size_t syntax_size = 100 * sizeof(SyntacticPattern);  // Max 100 syntax patterns
         size_t clusters_size = 50 * sizeof(SemanticCluster);  // Max 50 semantic clusters
+        size_t dialogue_size = 200 * sizeof(DialoguePattern);  // Max 200 dialogue patterns
         size_t errors_size = n_neurons_ * sizeof(float);
         
         CUDA_CHECK(cudaMalloc(&d_neurons_, neurons_size));
@@ -1065,6 +1079,7 @@ public:
         CUDA_CHECK(cudaMalloc(&d_episodes_, episodes_size));
         CUDA_CHECK(cudaMalloc(&d_syntax_patterns_, syntax_size));
         CUDA_CHECK(cudaMalloc(&d_semantic_clusters_, clusters_size));
+        CUDA_CHECK(cudaMalloc(&d_dialogue_patterns_, dialogue_size));
         CUDA_CHECK(cudaMalloc(&d_prediction_errors_, errors_size));
         
         // Allocate layer activation and weight arrays
@@ -1084,6 +1099,7 @@ public:
         h_output_spikes_ = (float*)malloc(spikes_size);
         h_syntax_patterns_ = (SyntacticPattern*)malloc(syntax_size);
         h_semantic_clusters_ = (SemanticCluster*)malloc(clusters_size);
+        h_dialogue_patterns_ = (DialoguePattern*)malloc(dialogue_size);
         
         // Clear GPU memory
         CUDA_CHECK(cudaMemset(d_input_currents_, 0, currents_size));
@@ -1091,9 +1107,10 @@ public:
         CUDA_CHECK(cudaMemset(d_connections_, 0, connections_size));
         CUDA_CHECK(cudaMemset(d_syntax_patterns_, 0, syntax_size));
         CUDA_CHECK(cudaMemset(d_semantic_clusters_, 0, clusters_size));
+        CUDA_CHECK(cudaMemset(d_dialogue_patterns_, 0, dialogue_size));
         
         float total_mb = (float)(neurons_size + currents_size + spikes_size + rand_size + pattern_size +
-                                connections_size + layers_size + episodes_size + syntax_size + clusters_size + errors_size) / (1024*1024);
+                                connections_size + layers_size + episodes_size + syntax_size + clusters_size + dialogue_size + errors_size) / (1024*1024);
         
         printf("💾 Advanced GPU Memory Allocated: %.1f MB\n", total_mb);
     }
@@ -1236,6 +1253,62 @@ public:
         }
         
         return -1;  // Vocabulary full
+    }
+    
+    void load_dialogue_patterns() {
+        printf("📚 Loading dialogue patterns from data/dialogue_dataset.txt...\n");
+        
+        FILE* file = fopen("data/dialogue_dataset.txt", "r");
+        if (!file) {
+            printf("⚠️  Warning: No dialogue dataset found\n");
+            return;
+        }
+        
+        char line[1024];
+        std::string current_human = "";
+        int patterns_loaded = 0;
+        
+        while (fgets(line, sizeof(line), file) && patterns_loaded < 200) {
+            // Remove newline
+            line[strcspn(line, "\n")] = 0;
+            
+            // Skip comments and empty lines
+            if (line[0] == '#' || strlen(line) == 0) continue;
+            
+            std::string text(line);
+            if (text.find("human: ") == 0) {
+                current_human = text.substr(7);  // Remove "human: "
+            } else if (text.find("ai: ") == 0 && !current_human.empty()) {
+                std::string ai_response = text.substr(4);  // Remove "ai: "
+                
+                // Create dialogue pattern
+                DialoguePattern pattern;
+                strncpy(pattern.input_pattern, current_human.c_str(), 255);
+                pattern.input_pattern[255] = '\0';
+                strncpy(pattern.response_pattern, ai_response.c_str(), 255);
+                pattern.response_pattern[255] = '\0';
+                pattern.confidence = 0.9f;
+                pattern.usage_count = 0;
+                
+                // Store in host memory
+                h_dialogue_patterns_[patterns_loaded] = pattern;
+                patterns_loaded++;
+                
+                // Reset for next pair
+                current_human = "";
+            }
+        }
+        
+        fclose(file);
+        n_dialogue_patterns_ = patterns_loaded;
+        
+        // Copy to GPU
+        if (patterns_loaded > 0) {
+            CUDA_CHECK(cudaMemcpy(d_dialogue_patterns_, h_dialogue_patterns_, 
+                                patterns_loaded * sizeof(DialoguePattern), cudaMemcpyHostToDevice));
+        }
+        
+        printf("   ✅ Loaded %d dialogue patterns\n", patterns_loaded);
     }
     
     void process_hierarchical_layers() {
@@ -1530,6 +1603,13 @@ public:
         CUDA_CHECK(cudaMemcpy(h_semantic_clusters_, d_semantic_clusters_, 50 * sizeof(SemanticCluster), cudaMemcpyDeviceToHost));
         fwrite(h_semantic_clusters_, sizeof(SemanticCluster), 50, file);
         
+        // 8. Write dialogue patterns
+        fwrite(&n_dialogue_patterns_, sizeof(int), 1, file);
+        if (n_dialogue_patterns_ > 0) {
+            CUDA_CHECK(cudaMemcpy(h_dialogue_patterns_, d_dialogue_patterns_, n_dialogue_patterns_ * sizeof(DialoguePattern), cudaMemcpyDeviceToHost));
+            fwrite(h_dialogue_patterns_, sizeof(DialoguePattern), n_dialogue_patterns_, file);
+        }
+        
         fclose(file);
         
         // Get file size
@@ -1543,6 +1623,7 @@ public:
         printf("   📊 Size: %.1f KB\n", file_size / 1024.0f);
         printf("   🧠 Neurons: %d\n", n_neurons_);
         printf("   📚 Vocabulary: %d words\n", vocabulary_size_);
+        printf("   💬 Dialogue patterns: %d\n", n_dialogue_patterns_);
         printf("   ⏱️  Training time: %.3f s\n", global_time_);
         printf("   🎯 Episodes: %d\n", current_episode_);
         
@@ -1680,6 +1761,9 @@ int main() {
         
         // Try to load existing model
         bool model_loaded = cuda_nnn.load_model("model.bin");
+        
+        // Load dialogue patterns for conversational learning
+        cuda_nnn.load_dialogue_patterns();
         
         // Print GPU info
         cuda_nnn.print_gpu_info();
