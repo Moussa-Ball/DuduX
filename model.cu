@@ -18,6 +18,8 @@ Created: August 4, 2025
 #include <math.h>
 #include <string.h>
 #include <time.h>
+#include <vector>
+#include <string>
 
 // CUDA error checking
 #define CUDA_CHECK(call) \
@@ -1685,32 +1687,78 @@ int main() {
         printf("\n🔥 STARTING TRAINING SESSION\n");
         printf("============================\n");
         
-        // Training dataset - can be expanded
-        const char* training_sentences[] = {
-            "the cat runs fast",
-            "dogs love to jump high", 
-            "birds fly through trees",
-            "happy children learn quickly",
-            "red flowers are beautiful",
-            "big lions hunt zebras",
-            "people think about love",
-            "students understand new concepts",
-            "water flows down the river",
-            "bright stars shine at night",
-            "trees grow tall in forests",
-            "fish swim in deep oceans",
-            "fire burns with orange flames",
-            "wind moves through the leaves",
-            "snow falls on mountain peaks",
-            "rain drops on the ground",
-            "birds sing in the morning",
-            "cats sleep on warm beds",
-            "dogs play in the garden",
-            "children laugh with joy"
-        };
-        int n_sentences = sizeof(training_sentences) / sizeof(training_sentences[0]);
+        // Load training data from files
+        std::vector<std::string> training_sentences;
         
-        printf("📚 Training Dataset: %d sentences\n", n_sentences);
+        // Read QA dataset
+        printf("📂 Loading data/qa_dataset.txt...\n");
+        FILE* qa_file = fopen("data/qa_dataset.txt", "r");
+        if (qa_file) {
+            char line[512];
+            while (fgets(line, sizeof(line), qa_file)) {
+                // Skip comments and empty lines
+                if (line[0] != '#' && strlen(line) > 2) {
+                    // Remove newline
+                    line[strcspn(line, "\n")] = 0;
+                    training_sentences.push_back(std::string(line));
+                }
+            }
+            fclose(qa_file);
+            printf("   ✅ Loaded %zu QA patterns\n", training_sentences.size());
+        } else {
+            printf("   ⚠️  Warning: data/qa_dataset.txt not found\n");
+        }
+        
+        // Read dialogue dataset
+        printf("📂 Loading data/dialogue_dataset.txt...\n");
+        FILE* dialogue_file = fopen("data/dialogue_dataset.txt", "r");
+        if (dialogue_file) {
+            char line[512];
+            int dialogue_count = 0;
+            while (fgets(line, sizeof(line), dialogue_file)) {
+                // Skip comments and empty lines
+                if (line[0] != '#' && strlen(line) > 2) {
+                    // Remove newline
+                    line[strcspn(line, "\n")] = 0;
+                    training_sentences.push_back(std::string(line));
+                    dialogue_count++;
+                }
+            }
+            fclose(dialogue_file);
+            printf("   ✅ Loaded %d dialogue patterns\n", dialogue_count);
+        } else {
+            printf("   ⚠️  Warning: data/dialogue_dataset.txt not found\n");
+        }
+        
+        // Read knowledge dataset
+        printf("📂 Loading data/knowledge_dataset.txt...\n");
+        FILE* knowledge_file = fopen("data/knowledge_dataset.txt", "r");
+        if (knowledge_file) {
+            char line[512];
+            int knowledge_count = 0;
+            while (fgets(line, sizeof(line), knowledge_file)) {
+                // Skip comments and empty lines
+                if (line[0] != '#' && strlen(line) > 2) {
+                    // Remove newline
+                    line[strcspn(line, "\n")] = 0;
+                    training_sentences.push_back(std::string(line));
+                    knowledge_count++;
+                }
+            }
+            fclose(knowledge_file);
+            printf("   ✅ Loaded %d knowledge patterns\n", knowledge_count);
+        } else {
+            printf("   ⚠️  Warning: data/knowledge_dataset.txt not found\n");
+        }
+        
+        int n_sentences = training_sentences.size();
+        
+        if (n_sentences == 0) {
+            printf("❌ No training data found! Please check data/ folder\n");
+            return 1;
+        }
+        
+        printf("📚 Total Training Dataset: %d sentences\n", n_sentences);
         printf("🎯 Starting bio-faithful learning process...\n\n");
         
         float total_time = 0.0f;
@@ -1722,11 +1770,11 @@ int main() {
             
             for (int i = 0; i < n_sentences; i++) {
                 printf("🧠 Training sentence %d/%d: ", i + 1, n_sentences);
-                float sentence_time = cuda_nnn.process_sentence_cuda(training_sentences[i]);
+                float sentence_time = cuda_nnn.process_sentence_cuda(training_sentences[i].c_str());
                 total_time += sentence_time;
                 
                 // Show progress
-                if ((i + 1) % 5 == 0) {
+                if ((i + 1) % 10 == 0) {
                     printf("   📊 Progress: %d/%d sentences (%.1f%%)\n", 
                            i + 1, n_sentences, 100.0f * (i + 1) / n_sentences);
                 }
