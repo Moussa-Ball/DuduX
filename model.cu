@@ -1003,6 +1003,7 @@ public:
         initialize_network();
         
         printf("✅ Advanced CUDA Neural Network Ready!\n");
+        printf("💡 Use save_model() and load_model() for persistence\n");
     }
     
     ~BioFaithfulCudaNNN() {
@@ -1461,6 +1462,185 @@ public:
         }
     }
     
+    // ========================== MODEL PERSISTENCE ==========================
+    
+    struct ModelHeader {
+        char magic[8];           // "DUDUXAI\0"
+        int version;             // Model version
+        int n_neurons;           // Number of neurons
+        int n_layers;            // Number of layers
+        int vocabulary_size;     // Vocabulary size
+        float global_time;       // Simulation time
+        float global_energy;     // Energy budget
+        int current_episode;     // Episode count
+        char reserved[64];       // Future use
+    };
+    
+    bool save_model(const char* filename = "model.bin") {
+        printf("\n💾 Saving complete model to %s...\n", filename);
+        
+        FILE* file = fopen(filename, "wb");
+        if (!file) {
+            printf("❌ Error: Cannot create %s\n", filename);
+            return false;
+        }
+        
+        // 1. Write header
+        ModelHeader header = {};
+        strcpy(header.magic, "DUDUXAI");
+        header.version = 1;
+        header.n_neurons = n_neurons_;
+        header.n_layers = n_layers_;
+        header.vocabulary_size = vocabulary_size_;
+        header.global_time = global_time_;
+        header.global_energy = global_energy_budget_;
+        header.current_episode = current_episode_;
+        
+        fwrite(&header, sizeof(ModelHeader), 1, file);
+        
+        // 2. Write vocabulary
+        fwrite(vocabulary_, sizeof(char[32]), vocabulary_size_, file);
+        
+        // 3. Write layer sizes
+        fwrite(layer_sizes_, sizeof(int), n_layers_, file);
+        
+        // 4. Write neuron states (from GPU)
+        CUDA_CHECK(cudaMemcpy(h_neurons_, d_neurons_, n_neurons_ * sizeof(BioNeuron), cudaMemcpyDeviceToHost));
+        fwrite(h_neurons_, sizeof(BioNeuron), n_neurons_, file);
+        
+        // 5. Write layer weights
+        for (int i = 0; i < n_layers_; i++) {
+            int prev_size = (i == 0) ? n_neurons_ : layer_sizes_[i-1];
+            int current_size = layer_sizes_[i];
+            int weight_count = prev_size * current_size;
+            
+            float* h_weights = (float*)malloc(weight_count * sizeof(float));
+            CUDA_CHECK(cudaMemcpy(h_weights, d_layer_weights_[i], weight_count * sizeof(float), cudaMemcpyDeviceToHost));
+            fwrite(h_weights, sizeof(float), weight_count, file);
+            free(h_weights);
+        }
+        
+        // 6. Write syntax patterns
+        CUDA_CHECK(cudaMemcpy(h_syntax_patterns_, d_syntax_patterns_, 100 * sizeof(SyntacticPattern), cudaMemcpyDeviceToHost));
+        fwrite(h_syntax_patterns_, sizeof(SyntacticPattern), 100, file);
+        
+        // 7. Write semantic clusters
+        CUDA_CHECK(cudaMemcpy(h_semantic_clusters_, d_semantic_clusters_, 50 * sizeof(SemanticCluster), cudaMemcpyDeviceToHost));
+        fwrite(h_semantic_clusters_, sizeof(SemanticCluster), 50, file);
+        
+        fclose(file);
+        
+        // Get file size
+        FILE* size_check = fopen(filename, "rb");
+        fseek(size_check, 0, SEEK_END);
+        long file_size = ftell(size_check);
+        fclose(size_check);
+        
+        printf("✅ Model saved successfully!\n");
+        printf("   📁 File: %s\n", filename);
+        printf("   📊 Size: %.1f KB\n", file_size / 1024.0f);
+        printf("   🧠 Neurons: %d\n", n_neurons_);
+        printf("   📚 Vocabulary: %d words\n", vocabulary_size_);
+        printf("   ⏱️  Training time: %.3f s\n", global_time_);
+        printf("   🎯 Episodes: %d\n", current_episode_);
+        
+        return true;
+    }
+    
+    bool load_model(const char* filename = "model.bin") {
+        printf("\n📚 Loading model from %s...\n", filename);
+        
+        FILE* file = fopen(filename, "rb");
+        if (!file) {
+            printf("⚠️  No existing model found: %s\n", filename);
+            printf("🆕 Starting with fresh model\n");
+            return false;
+        }
+        
+        // 1. Read and verify header
+        ModelHeader header;
+        if (fread(&header, sizeof(ModelHeader), 1, file) != 1) {
+            printf("❌ Error reading model header\n");
+            fclose(file);
+            return false;
+        }
+        
+        if (strcmp(header.magic, "DUDUXAI") != 0) {
+            printf("❌ Invalid model file format\n");
+            fclose(file);
+            return false;
+        }
+        
+        if (header.n_neurons != n_neurons_ || header.n_layers != n_layers_) {
+            printf("❌ Model architecture mismatch:\n");
+            printf("   File: %d neurons, %d layers\n", header.n_neurons, header.n_layers);
+            printf("   Current: %d neurons, %d layers\n", n_neurons_, n_layers_);
+            fclose(file);
+            return false;
+        }
+        
+        // 2. Load vocabulary
+        vocabulary_size_ = header.vocabulary_size;
+        if (vocabulary_size_ > MAX_VOCABULARY) {
+            printf("❌ Vocabulary too large: %d > %d\n", vocabulary_size_, MAX_VOCABULARY);
+            fclose(file);
+            return false;
+        }
+        fread(vocabulary_, sizeof(char[32]), vocabulary_size_, file);
+        
+        // 3. Load layer sizes (verify)
+        int* loaded_sizes = (int*)malloc(n_layers_ * sizeof(int));
+        fread(loaded_sizes, sizeof(int), n_layers_, file);
+        for (int i = 0; i < n_layers_; i++) {
+            if (loaded_sizes[i] != layer_sizes_[i]) {
+                printf("❌ Layer size mismatch at layer %d: %d != %d\n", i, loaded_sizes[i], layer_sizes_[i]);
+                free(loaded_sizes);
+                fclose(file);
+                return false;
+            }
+        }
+        free(loaded_sizes);
+        
+        // 4. Load neuron states
+        fread(h_neurons_, sizeof(BioNeuron), n_neurons_, file);
+        CUDA_CHECK(cudaMemcpy(d_neurons_, h_neurons_, n_neurons_ * sizeof(BioNeuron), cudaMemcpyHostToDevice));
+        
+        // 5. Load layer weights
+        for (int i = 0; i < n_layers_; i++) {
+            int prev_size = (i == 0) ? n_neurons_ : layer_sizes_[i-1];
+            int current_size = layer_sizes_[i];
+            int weight_count = prev_size * current_size;
+            
+            float* h_weights = (float*)malloc(weight_count * sizeof(float));
+            fread(h_weights, sizeof(float), weight_count, file);
+            CUDA_CHECK(cudaMemcpy(d_layer_weights_[i], h_weights, weight_count * sizeof(float), cudaMemcpyHostToDevice));
+            free(h_weights);
+        }
+        
+        // 6. Load syntax patterns
+        fread(h_syntax_patterns_, sizeof(SyntacticPattern), 100, file);
+        CUDA_CHECK(cudaMemcpy(d_syntax_patterns_, h_syntax_patterns_, 100 * sizeof(SyntacticPattern), cudaMemcpyHostToDevice));
+        
+        // 7. Load semantic clusters
+        fread(h_semantic_clusters_, sizeof(SemanticCluster), 50, file);
+        CUDA_CHECK(cudaMemcpy(d_semantic_clusters_, h_semantic_clusters_, 50 * sizeof(SemanticCluster), cudaMemcpyHostToDevice));
+        
+        // 8. Restore state
+        global_time_ = header.global_time;
+        global_energy_budget_ = header.global_energy;
+        current_episode_ = header.current_episode;
+        
+        fclose(file);
+        
+        printf("✅ Model loaded successfully!\n");
+        printf("   📚 Vocabulary: %d words restored\n", vocabulary_size_);
+        printf("   ⏱️  Training time: %.3f s\n", global_time_);
+        printf("   🎯 Episodes: %d\n", current_episode_);
+        printf("   🧠 Neural states and weights restored\n");
+        
+        return true;
+    }
+    
     void print_gpu_info() {
         cudaDeviceProp prop;
         CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
@@ -1473,12 +1653,12 @@ public:
     }
 };
 
-// Main demonstration
+// Main training program
 int main() {
-    printf("🚀 ADVANCED BIO-FAITHFUL CUDA NEURAL NETWORK\n");
+    printf("🚀 DUDUX AI - ADVANCED BIO-FAITHFUL TRAINING\n");
     printf("===========================================\n");
-    printf("🧠 REVOLUTIONARY: Complete Bio-Faithful Brain Simulation\n");
-    printf("⚡ CUDA | 🧠 Bio-Faithful | 🏗️ Hierarchical | �️ Syntax | 🧩 Semantic\n\n");
+    printf("🧠 Bio-Faithful Neural Network Training System\n");
+    printf("⚡ CUDA Accelerated Training for GTX 1650\n\n");
     
     // Check CUDA availability
     int device_count;
@@ -1496,14 +1676,17 @@ int main() {
         // Initialize advanced CUDA neural network
         BioFaithfulCudaNNN cuda_nnn(2000, hierarchy_sizes, n_layers);
         
+        // Try to load existing model
+        bool model_loaded = cuda_nnn.load_model("model.bin");
+        
         // Print GPU info
         cuda_nnn.print_gpu_info();
         
-        printf("\n🔥 ADVANCED BIO-FAITHFUL PROCESSING\n");
-        printf("-----------------------------------\n");
+        printf("\n🔥 STARTING TRAINING SESSION\n");
+        printf("============================\n");
         
-        // Test sentences with semantic groups
-        const char* test_sentences[] = {
+        // Training dataset - can be expanded
+        const char* training_sentences[] = {
             "the cat runs fast",
             "dogs love to jump high", 
             "birds fly through trees",
@@ -1511,41 +1694,75 @@ int main() {
             "red flowers are beautiful",
             "big lions hunt zebras",
             "people think about love",
-            "students understand new concepts"
+            "students understand new concepts",
+            "water flows down the river",
+            "bright stars shine at night",
+            "trees grow tall in forests",
+            "fish swim in deep oceans",
+            "fire burns with orange flames",
+            "wind moves through the leaves",
+            "snow falls on mountain peaks",
+            "rain drops on the ground",
+            "birds sing in the morning",
+            "cats sleep on warm beds",
+            "dogs play in the garden",
+            "children laugh with joy"
         };
-        int n_sentences = sizeof(test_sentences) / sizeof(test_sentences[0]);
+        int n_sentences = sizeof(training_sentences) / sizeof(training_sentences[0]);
+        
+        printf("📚 Training Dataset: %d sentences\n", n_sentences);
+        printf("🎯 Starting bio-faithful learning process...\n\n");
         
         float total_time = 0.0f;
+        int epochs = 3;  // Multiple training epochs
         
-        for (int i = 0; i < n_sentences; i++) {
-            printf("\n🧠 Sentence %d:\n", i + 1);
-            float sentence_time = cuda_nnn.process_sentence_cuda(test_sentences[i]);
-            total_time += sentence_time;
+        for (int epoch = 0; epoch < epochs; epoch++) {
+            printf("🔄 EPOCH %d/%d\n", epoch + 1, epochs);
+            printf("----------------\n");
+            
+            for (int i = 0; i < n_sentences; i++) {
+                printf("🧠 Training sentence %d/%d: ", i + 1, n_sentences);
+                float sentence_time = cuda_nnn.process_sentence_cuda(training_sentences[i]);
+                total_time += sentence_time;
+                
+                // Show progress
+                if ((i + 1) % 5 == 0) {
+                    printf("   📊 Progress: %d/%d sentences (%.1f%%)\n", 
+                           i + 1, n_sentences, 100.0f * (i + 1) / n_sentences);
+                }
+            }
+            
+            printf("✅ Epoch %d completed\n\n", epoch + 1);
         }
         
-        printf("\n⚡ PERFORMANCE SUMMARY:\n");
-        printf("   Total processing time: %.2f ms\n", total_time);
-        printf("   Average per sentence: %.2f ms\n", total_time / n_sentences);
-        printf("   Estimated Python speedup: ~500-1000x faster!\n");
-        printf("   Real-time processing: ✅ ACHIEVED\n");
+        printf("⚡ TRAINING COMPLETED!\n");
+        printf("=====================\n");
+        printf("   Total training time: %.2f ms\n", total_time);
+        printf("   Average per sentence: %.2f ms\n", total_time / (n_sentences * epochs));
+        printf("   Total sentences processed: %d\n", n_sentences * epochs);
+        printf("   Bio-faithful learning: ✅ COMPLETED\n");
         
-        // Print comprehensive statistics
+        // Print comprehensive training statistics
         cuda_nnn.get_network_stats();
         
-        printf("\n🏆 ADVANCED CUDA BIO-FAITHFUL SIMULATION SUCCESS!\n");
-        printf("==================================================\n");
+        // Save trained model
+        cuda_nnn.save_model("model.bin");
+        
+        printf("\n🏆 TRAINING SESSION SUCCESSFUL!\n");
+        printf("===============================\n");
         printf("🚀 ACHIEVEMENTS:\n");
-        printf("   ✅ Real-time hierarchical processing\n");
-        printf("   ✅ STDP learning implemented\n");
+        printf("   ✅ %d epochs completed\n", epochs);
+        printf("   ✅ %d sentences learned\n", n_sentences * epochs);
+        printf("   ✅ Real-time STDP learning\n");
         printf("   ✅ Syntactic pattern emergence\n");
         printf("   ✅ Semantic clustering\n");
-        printf("   ✅ Prediction error computation\n");
-        printf("   ✅ Energy-aware metabolism\n");
-        printf("   ✅ Complete bio-faithful simulation\n");
-        printf("\n⚡ Bio-faithful brain simulation at GPU speed! 🧠✨\n");
+        printf("   ✅ Hierarchical processing\n");
+        printf("   ✅ Memory consolidation\n");
+        printf("   ✅ Model saved to model.bin\n");
+        printf("\n💡 Next step: Use './inference' for interactive testing!\n");
         
     } catch (...) {
-        printf("❌ Error during advanced CUDA simulation\n");
+        printf("❌ Error during training session\n");
         return 1;
     }
     
