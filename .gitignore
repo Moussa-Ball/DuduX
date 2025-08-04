@@ -1,0 +1,116 @@
+# Bio-Faithful CUDA Neural Network - Git Ignore
+# ===============================================
+
+# Compiled binaries
+model
+*.o
+*.exe
+*.out
+*.app
+
+# CUDA compiled files
+*.cubin
+*.ptx
+*.fatbin
+
+# Object files
+*.obj
+*.ko
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Debug files
+*.pdb
+*.dSYM/
+*.su
+*.idb
+
+# Core dumps
+core
+*.core
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.#*
+*#
+
+# Build directories
+build/
+bin/
+obj/
+release/
+debug/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+*.orig
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs and output files
+*.log
+*.txt
+output/
+results/
+
+# CUDA profiler files
+*.nvvp
+*.prof
+*.timeline
+nvvp_*
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+_deps/
+
+# Memory dumps and debug
+*.dmp
+valgrind-*
+gmon.out
+
+# Backup files
+*.backup
+*.bckp
+
+# Archive files (unless specifically needed)
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Environment specific
+.env
+.env.local
+
+# Testing artifacts
+test_output/
+benchmark_results/
+
+# Documentation build
+docs/build/
+*.pdf
+
+# Dependencies (if using package managers)
+node_modules/
+vendor/
