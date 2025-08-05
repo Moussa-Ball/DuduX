@@ -1,337 +1,217 @@
-#!/usr/bin/env python3
 """
-DUDUX-GPT Tokenizer
-==================
+Tokenizer Module for Binary Neural Network (NNN) Processing
 
-🔤 Professional tokenization for DUDUX binary neural architecture
-⚡ TikToken integration with GPU optimization
-🎯 Compatible with DuduxGPT model architecture
-🧠 Efficient text to token conversion for binary neurons
+This module provides tokenization capabilities that convert raw text into
+sparse distributed representations (SDR) suitable for binary neural networks.
 
-Authors: DUDUX Research Team
-Version: 4.0.0 Professional
-Created: August 5, 2025
+Author: Moussa Ball
+Email: moiseball20155@gmail.com
+Date: August 5, 2025
 """
 
-import torch
+import random
 import tiktoken
-import numpy as np
-from typing import List, Dict, Optional, Union, Tuple
-import warnings
-
-# Suppress warnings for cleaner output
-warnings.filterwarnings("ignore")
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 
-class DuduxTokenizer:
+@dataclass
+class TokenizerConfig:
+    """Configuration class for the tokenizer."""
+    encoding_name: str = "cl100k_base"  # GPT-4 tokenizer by default, can also use "gpt2"
+    sdr_length: int = 1024
+    sparsity: float = 0.02
+    cache_size: int = 10000
+
+
+class BinaryTokenizer:
     """
-    Professional tokenizer for DUDUX-GPT binary neural architecture
-    Uses TikToken for robust tokenization with GPU optimization
+    A tokenizer that converts text to sparse distributed representations (SDR).
+
+    This tokenizer uses tiktoken for initial tokenization and converts each token ID
+    to a binary sparse vector suitable for processing by binary neural networks.
     """
 
-    def __init__(
-        self,
-        encoding_name: str = "gpt2",  # GPT-2 encoding (50K vocab)
-        max_length: int = 4096,
-        device: Optional[torch.device] = None,
-        verbose: bool = True
-    ):
+    def __init__(self, config: Optional[TokenizerConfig] = None):
         """
-        Initialize DUDUX tokenizer
+        Initialize the tokenizer with configuration.
 
         Args:
-            encoding_name: TikToken encoding name
-            max_length: Maximum sequence length
-            device: Compute device (auto-detected if None)
-            verbose: Print initialization info
+            config: TokenizerConfig object with tokenizer parameters
         """
-        self.encoding_name = encoding_name
-        self.max_length = max_length
-        self.device = device or torch.device(
-            'cuda' if torch.cuda.is_available() else 'cpu')
+        self.config = config or TokenizerConfig()
+        self.encoder = tiktoken.get_encoding(self.config.encoding_name)
+        self._sdr_cache: Dict[int, List[int]] = {}
 
-        if verbose:
-            print(f"🔤 Initializing DUDUX Tokenizer...")
-            print(f"   📚 Encoding: {encoding_name}")
-            print(f"   📏 Max Length: {max_length}")
-            print(f"   🎮 Device: {self.device}")
+        # Validate configuration
+        self._validate_config()
 
-        # Initialize TikToken encoder
-        try:
-            self.tokenizer = tiktoken.get_encoding(encoding_name)
-            self.vocab_size = self.tokenizer.n_vocab
-            if verbose:
-                print(f"   ✅ TikToken loaded: {self.vocab_size:,} tokens")
-        except Exception as e:
-            if verbose:
-                print(f"   ❌ TikToken error: {e}")
-                print(f"   🔄 Falling back to GPT-2 encoding...")
-            self.tokenizer = tiktoken.get_encoding("gpt2")
-            self.vocab_size = self.tokenizer.n_vocab
+    def _validate_config(self) -> None:
+        """Validate tokenizer configuration parameters."""
+        if self.config.sdr_length <= 0:
+            raise ValueError("SDR length must be positive")
 
-        # Special tokens compatible with DuduxGPT
-        self.pad_token_id = 0
-        self.unk_token_id = 1
-        self.bos_token_id = 2  # Beginning of sequence
-        self.eos_token_id = 3  # End of sequence
+        if not (0 < self.config.sparsity < 1):
+            raise ValueError("Sparsity must be between 0 and 1")
 
-        if verbose:
-            print(f"   🎯 Vocabulary Size: {self.vocab_size:,}")
-            print(f"   🚀 Ready for DUDUX-GPT!")
+        num_active_bits = int(self.config.sdr_length * self.config.sparsity)
+        if num_active_bits == 0:
+            raise ValueError("Sparsity too low: results in 0 active bits")
 
-    def encode(
-        self,
-        text: str,
-        add_special_tokens: bool = True,
-        max_length: Optional[int] = None
-    ) -> List[int]:
+    def tokenize_text(self, text: str) -> List[int]:
         """
-        Encode text to token IDs
+        Tokenize input text into token IDs.
 
         Args:
-            text: Input text
-            add_special_tokens: Add BOS/EOS tokens
-            max_length: Override default max length
+            text: Input text string
 
         Returns:
             List of token IDs
         """
-        if not text.strip():
-            return [self.pad_token_id]
+        if not isinstance(text, str):
+            raise TypeError("Input must be a string")
 
-        max_len = max_length or self.max_length
+        return self.encoder.encode(text)
 
-        try:
-            # TikToken encoding
-            token_ids = self.tokenizer.encode(text)
-
-            # Add special tokens
-            if add_special_tokens:
-                token_ids = [self.bos_token_id] + \
-                    token_ids + [self.eos_token_id]
-
-            # Truncate if too long
-            if len(token_ids) > max_len:
-                token_ids = token_ids[:max_len-1] + [self.eos_token_id]
-
-            return token_ids
-
-        except Exception as e:
-            warnings.warn(
-                f"Encoding failed for text: {text[:50]}... Error: {e}")
-            return [self.unk_token_id]
-
-    def decode(
-        self,
-        token_ids: Union[List[int], torch.Tensor],
-        skip_special_tokens: bool = True
-    ) -> str:
+    def id_to_sdr(self, token_id: int) -> List[int]:
         """
-        Decode token IDs back to text
+        Convert a token ID to sparse distributed representation (SDR).
+
+        This function creates a deterministic binary vector where only a small
+        percentage of bits are active (set to 1). The same token ID will always
+        produce the same SDR pattern.
 
         Args:
-            token_ids: Token IDs (list or tensor)
-            skip_special_tokens: Skip special tokens
+            token_id: Integer token ID to convert
 
         Returns:
-            Decoded text
+            Binary vector as list of integers (0s and 1s)
         """
-        # Convert tensor to list if needed
-        if isinstance(token_ids, torch.Tensor):
-            token_ids = token_ids.cpu().tolist()
+        # Check cache first
+        if token_id in self._sdr_cache:
+            return self._sdr_cache[token_id].copy()
 
-        try:
-            # Filter special tokens
-            if skip_special_tokens:
-                special_tokens = {self.pad_token_id, self.bos_token_id,
-                                  self.eos_token_id, self.unk_token_id}
-                filtered_ids = [
-                    tid for tid in token_ids if tid not in special_tokens]
-            else:
-                filtered_ids = token_ids
+        # Generate deterministic SDR using token_id as seed
+        random.seed(token_id)
 
-            # TikToken decoding
-            text = self.tokenizer.decode(filtered_ids)
-            return text.strip()
+        # Initialize empty SDR
+        sdr = [0] * self.config.sdr_length
 
-        except Exception as e:
-            warnings.warn(
-                f"Decoding failed for tokens: {token_ids[:10]}... Error: {e}")
-            return "<DECODE_ERROR>"
+        # Calculate number of active bits
+        num_active = int(self.config.sdr_length * self.config.sparsity)
 
-    def encode_batch(
-        self,
-        texts: List[str],
-        add_special_tokens: bool = True,
-        padding: bool = True,
-        return_tensors: bool = True
-    ) -> Union[torch.Tensor, List[List[int]]]:
+        # Randomly select positions for active bits
+        active_positions = random.sample(
+            range(self.config.sdr_length), num_active)
+
+        # Set active bits
+        for pos in active_positions:
+            sdr[pos] = 1
+
+        # Cache the result if cache is not full
+        if len(self._sdr_cache) < self.config.cache_size:
+            self._sdr_cache[token_id] = sdr.copy()
+
+        return sdr
+
+    def text_to_sdr_sequence(self, text: str) -> List[List[int]]:
         """
-        Encode batch of texts with padding
+        Convert text to sequence of SDR patterns.
+
+        This is the main pipeline function that combines tokenization and
+        SDR conversion into a single operation.
 
         Args:
-            texts: List of input texts
-            add_special_tokens: Add special tokens
-            padding: Pad sequences to same length
-            return_tensors: Return as tensors
+            text: Input text string
 
         Returns:
-            Padded batch (tensor or list)
+            List of SDR patterns, one for each token
         """
-        batch_ids = []
+        token_ids = self.tokenize_text(text)
+        sdr_patterns = [self.id_to_sdr(token_id) for token_id in token_ids]
+        return sdr_patterns
 
-        # Encode all texts
-        for text in texts:
-            token_ids = self.encode(text, add_special_tokens)
-            batch_ids.append(token_ids)
-
-        if padding:
-            # Pad to same length
-            max_len = min(max(len(ids) for ids in batch_ids), self.max_length)
-
-            padded_batch = []
-            for token_ids in batch_ids:
-                if len(token_ids) < max_len:
-                    padded_ids = token_ids + \
-                        [self.pad_token_id] * (max_len - len(token_ids))
-                else:
-                    padded_ids = token_ids[:max_len]
-                padded_batch.append(padded_ids)
-
-            batch_ids = padded_batch
-
-        if return_tensors:
-            return torch.tensor(batch_ids, dtype=torch.long, device=self.device)
-
-        return batch_ids
-
-    def create_attention_mask(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def decode_tokens(self, token_ids: List[int]) -> str:
         """
-        Create attention mask for padded sequences
+        Decode token IDs back to text.
 
         Args:
-            input_ids: Token IDs tensor [batch_size, seq_len]
+            token_ids: List of token IDs
 
         Returns:
-            Attention mask [batch_size, seq_len]
+            Decoded text string
         """
-        return (input_ids != self.pad_token_id).float()
+        return self.encoder.decode(token_ids)
 
-    def get_vocab_info(self) -> Dict:
-        """Get vocabulary information"""
-        return {
-            'encoding_name': self.encoding_name,
-            'vocab_size': self.vocab_size,
-            'max_length': self.max_length,
-            'device': str(self.device),
-            'special_tokens': {
-                'pad_token_id': self.pad_token_id,
-                'unk_token_id': self.unk_token_id,
-                'bos_token_id': self.bos_token_id,
-                'eos_token_id': self.eos_token_id
-            }
-        }
+    def get_vocabulary_size(self) -> int:
+        """Get the size of the tokenizer vocabulary."""
+        return self.encoder.n_vocab
 
-    def analyze_text(self, text: str) -> Dict:
+    def get_sdr_stats(self, sdr: List[int]) -> Dict[str, float]:
         """
-        Analyze text tokenization
+        Calculate statistics for an SDR pattern.
 
         Args:
-            text: Input text
+            sdr: Binary vector
 
         Returns:
-            Analysis dictionary with statistics
+            Dictionary with statistics (sparsity, active_bits, etc.)
         """
-        token_ids = self.encode(text, add_special_tokens=True)
-        decoded = self.decode(token_ids, skip_special_tokens=False)
-
-        # Calculate metrics
-        char_count = len(text)
-        token_count = len(token_ids)
-        compression_ratio = char_count / token_count if token_count > 0 else 0
-
-        # Sample token breakdown
-        tokens_preview = []
-        for tid in token_ids[:10]:
-            try:
-                token_text = self.decode([tid], skip_special_tokens=False)
-                tokens_preview.append(f"ID:{tid} -> '{token_text}'")
-            except:
-                tokens_preview.append(f"ID:{tid} -> <ERROR>")
+        active_bits = sum(sdr)
+        total_bits = len(sdr)
+        sparsity = active_bits / total_bits if total_bits > 0 else 0
 
         return {
-            'original_text': text,
-            'token_ids': token_ids,
-            'decoded_text': decoded,
-            'char_count': char_count,
-            'token_count': token_count,
-            'compression_ratio': compression_ratio,
-            'tokens_preview': tokens_preview,
-            'efficiency': f"{compression_ratio:.2f} chars/token"
+            "active_bits": active_bits,
+            "total_bits": total_bits,
+            "sparsity": sparsity,
+            "density": 1.0 - sparsity
         }
 
+    def clear_cache(self) -> None:
+        """Clear the SDR cache."""
+        self._sdr_cache.clear()
 
-def test_tokenizer():
-    """Test DUDUX tokenizer functionality"""
-    print("🧪 Testing DUDUX Tokenizer")
-    print("=" * 50)
+    def get_cache_size(self) -> int:
+        """Get current cache size."""
+        return len(self._sdr_cache)
+
+
+def demo_tokenizer() -> None:
+    """Demonstration of the tokenizer functionality."""
+    print("=" * 60)
+    print("Binary Tokenizer Demo")
+    print("=" * 60)
 
     # Initialize tokenizer
-    tokenizer = DuduxTokenizer(encoding_name="cl100k_base")
+    tokenizer = BinaryTokenizer()
 
-    # Test texts for binary neural processing
-    test_texts = [
-        "Hello, world!",
-        "The revolutionary DUDUX-GPT uses binary neurons for intelligence.",
-        "Intelligence artificielle et neurosciences cognitives.",
-        "🧠 Binary patterns encode meaning through 0/1 operations! ⚡",
-        "",  # Empty string
-        "A" * 500,  # Long text
-    ]
+    # Example text
+    text = "Hello, how are you today?"
+    print(f"Input text: '{text}'")
 
-    print("\n📝 Tokenization Analysis:")
-    for i, text in enumerate(test_texts, 1):
-        print(f"\nTest {i}: '{text[:50]}{'...' if len(text) > 50 else ''}'")
-        analysis = tokenizer.analyze_text(text)
-        print(
-            f"  📊 Length: {analysis['char_count']} chars → {analysis['token_count']} tokens")
-        print(f"  🗜️ Efficiency: {analysis['efficiency']}")
-        print(f"  🔤 Sample tokens: {analysis['tokens_preview'][:3]}")
+    # Tokenize
+    token_ids = tokenizer.tokenize_text(text)
+    print(f"Token IDs: {token_ids}")
 
-    # Test batch processing
-    print(f"\n🔢 Batch Processing Test:")
-    batch_tensor = tokenizer.encode_batch(test_texts[:3], return_tensors=True)
-    attention_mask = tokenizer.create_attention_mask(batch_tensor)
+    # Convert to SDR sequence
+    sdr_sequence = tokenizer.text_to_sdr_sequence(text)
+    print(f"Number of SDR patterns: {len(sdr_sequence)}")
 
-    print(f"  📐 Batch shape: {batch_tensor.shape}")
-    print(f"  🎯 Attention mask shape: {attention_mask.shape}")
-    print(f"  📱 Device: {batch_tensor.device}")
-    print(f"  🔢 Sample tokens: {batch_tensor[0][:10].tolist()}")
+    # Show stats for first token
+    if sdr_sequence:
+        first_sdr = sdr_sequence[0]
+        stats = tokenizer.get_sdr_stats(first_sdr)
+        print(f"First token SDR stats: {stats}")
+        print(f"First 50 bits of first SDR: {first_sdr[:50]}")
 
-    # Test decoding
-    print(f"\n🔄 Decoding Test:")
-    original_text = "DUDUX binary neurons process information efficiently."
-    encoded = tokenizer.encode(original_text)
-    decoded = tokenizer.decode(encoded)
+    # Decode back
+    decoded_text = tokenizer.decode_tokens(token_ids)
+    print(f"Decoded text: '{decoded_text}'")
 
-    print(f"  📝 Original: {original_text}")
-    print(f"  🔢 Encoded: {encoded}")
-    print(f"  🔄 Decoded: {decoded}")
-    print(f"  ✅ Match: {original_text.strip() == decoded.strip()}")
-
-    # Vocabulary info
-    print(f"\n📚 Vocabulary Info:")
-    vocab_info = tokenizer.get_vocab_info()
-    for key, value in vocab_info.items():
-        if key != 'special_tokens':
-            print(f"  {key}: {value}")
-
-    print(f"\n✅ All tokenizer tests completed successfully!")
-    return tokenizer
+    print(f"Cache size: {tokenizer.get_cache_size()}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    # Run tests
-    tokenizer = test_tokenizer()
-
-    print(f"\n🎉 DUDUX Tokenizer ready for binary neural processing!")
+    demo_tokenizer()
