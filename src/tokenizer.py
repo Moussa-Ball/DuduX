@@ -31,7 +31,7 @@ class DuduxTokenizer:
 
     def __init__(
         self,
-        encoding_name: str = "cl100k_base",  # GPT-4 encoding (100K vocab)
+        encoding_name: str = "gpt2",  # GPT-2 encoding (50K vocab)
         max_length: int = 4096,
         device: Optional[torch.device] = None,
         verbose: bool = True

@@ -1,645 +1,547 @@
 #!/usr/bin/env python3
 """
-DUDUX-GPT Training Script
-========================
+DUDUX-GPT Professional Training Script
+BSO (Binary Spiking Online) Optimization Integration
+Optimized for GTX 1650 4GB VRAM
 
-🧠 Professional training for DUDUX binary neural architecture
-⚡ GPU-optimized training with real-time metrics
-🎯 Compatible with DuduxGPT model architecture
-🚀 Advanced training features and monitoring
-
-Authors: DUDUX Research Team
-Version: 4.0.0 Professional
-Created: August 5, 2025
+Author: DUDUX Team
+Date: August 5, 2025
+Version: 5.0.0
 """
 
 import os
 import sys
-import time
 import torch
 import torch.nn as nn
-import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from typing import Dict, Optional, Tuple
-from dataclasses import dataclass
+from torch.cuda.amp import GradScaler, autocast
+import logging
+import time
 import json
-from datetime import datetime, timedelta
-import math
+from datetime import datetime
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
+import signal
 
-# Add src to path for imports
+# Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-try:
-    from model import DuduxGPT
-    from tokenizer import DuduxTokenizer
-    from dataset import DatasetManager, DatasetConfig, create_sample_dataset
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print("Make sure you're running from the project root directory")
-    sys.exit(1)
-
+from model import DuduxGPT
+from tokenizer import DuduxTokenizer
+from dataset import DuduxDataset
 
 @dataclass
 class TrainingConfig:
-    """Professional training configuration for DUDUX-GPT"""
-
-    # Dataset parameters
-    dataset_path: str = "data/conversations.txt"
-    max_input_length: int = 512
-    max_output_length: int = 512
-    validation_split: float = 0.1
-
-    # Model parameters
-    vocab_size: int = 100277
-    d_model: int = 1024
-    num_layers: int = 32
-    num_heads: int = 32
-    max_seq_len: int = 4096
-    dropout: float = 0.1
-
-    # Training parameters
-    num_epochs: int = 5
-    learning_rate: float = 3e-4
-    weight_decay: float = 0.01
-    batch_size: int = 4
-    gradient_accumulation_steps: int = 4
+    """Configuration centralisée pour l'entraînement"""
+    # Architecture du modèle (ultra-compact pour GTX 1650)
+    vocab_size: int = 100277  # cl100k_base tokenizer
+    d_model: int = 256        # Très réduit pour économie mémoire
+    num_layers: int = 8       # Très réduit
+    num_heads: int = 8        # Réduit
+    max_seq_len: int = 128    # Très réduit pour économie mémoire
+    
+    # Paramètres d'entraînement
+    num_epochs: int = 15
+    learning_rate: float = 5e-4
+    batch_size: int = 1       # Batch size minimal
+    gradient_accumulation_steps: int = 16  # Batch effectif = 16
+    
+    # Longueurs de séquences (optimisées)
+    max_input_length: int = 80
+    max_output_length: int = 80
+    
+    # Optimisation BSO
+    optimizer: str = "bso"
+    bso_threshold: float = 5e-7
+    bso_beta1: float = 0.999
+    bso_beta2: float = 0.99999
+    bso_adaptive_threshold: bool = True
+    
+    # Optimisations GPU
+    mixed_precision: bool = True
     max_grad_norm: float = 1.0
-    warmup_steps: int = 1000
-
-    # Optimization
-    optimizer: str = "adamw"  # adamw, adam, sgd
-    scheduler: str = "cosine"  # cosine, linear, constant
-
-    # Logging and saving
-    log_every: int = 10
-    eval_every: int = 100
-    save_every: int = 500
-    save_path: str = "model/dudux_trained.pth"
+    warmup_steps: int = 100
+    
+    # Validation et sauvegarde
+    eval_every: int = 500
+    save_every: int = 1000
+    early_stopping_patience: int = 10
+    early_stopping_threshold: float = 0.0001
+    
+    # Chemins
+    model_save_path: str = "model/dudux_final.pth"
     log_path: str = "logs/training.log"
+    dataset_path: str = "data/conversations_extended.txt"
 
-    # Device and performance
-    device: str = "auto"  # auto, cuda, cpu
-    mixed_precision: bool = True  # Use automatic mixed precision
-    compile_model: bool = False  # Use torch.compile (requires PyTorch 2.0+)
-
-    # Early stopping
-    early_stopping_patience: int = 3
-    early_stopping_threshold: float = 0.001
-
-
-class TrainingLogger:
-    """Professional training logger with comprehensive metrics"""
-
-    def __init__(self, config: TrainingConfig):
-        self.config = config
-        self.start_time = 0.0
-        self.epoch_start_time = 0.0
-        self.step_times = []
-        self.train_losses = []
-        self.val_losses = []
-        self.learning_rates = []
-
-        # Create directories
-        os.makedirs(os.path.dirname(config.log_path), exist_ok=True)
-        os.makedirs(os.path.dirname(config.save_path), exist_ok=True)
-
-    def start_training(self, total_steps: int, model_params: int):
-        """Initialize training logging"""
-        self.start_time = time.time()
-        self.total_steps = total_steps
-
-        print(f"\n🚀 DUDUX-GPT TRAINING STARTED")
-        print(f"{'='*60}")
-        print(f"📊 Model Parameters: {model_params:,}")
-        print(f"🔄 Total Steps: {total_steps:,}")
-        print(f"📚 Epochs: {self.config.num_epochs}")
-        print(f"🎯 Batch Size: {self.config.batch_size}")
-        print(f"⚡ Learning Rate: {self.config.learning_rate}")
-        print(f"🎮 Device: {self.config.device}")
-        print(f"💾 Mixed Precision: {self.config.mixed_precision}")
-        print(f"{'='*60}\n")
-
-    def log_step(
-        self,
-        epoch: int,
-        step: int,
-        global_step: int,
-        train_loss: float,
-        learning_rate: float,
-        throughput: float,
-        gpu_memory: float = 0.0
-    ):
-        """Log training step with comprehensive metrics"""
-        self.train_losses.append(train_loss)
-        self.learning_rates.append(learning_rate)
-
-        # Calculate progress
-        progress = global_step / self.total_steps
-        elapsed = time.time() - self.start_time
-        eta = (elapsed / progress - elapsed) if progress > 0 else 0
-
-        # GPU memory info
-        gpu_info = ""
-        if torch.cuda.is_available():
-            gpu_used = torch.cuda.memory_allocated() / 1024**3  # GB
-            gpu_total = torch.cuda.get_device_properties(
-                0).total_memory / 1024**3  # GB
-            gpu_info = f"GPU: {gpu_used:.1f}GB/{gpu_total:.1f}GB"
-
-        # Professional progress bar like Transformers
-        if step % self.config.log_every == 0:
-            bar_length = 20
-            filled_length = int(bar_length * progress)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-
-            print(f"Epoch {epoch:2d}: {progress*100:5.1f}%|{bar}| "
-                  f"Step {global_step:6d}/{self.total_steps} | "
-                  f"Loss: {train_loss:.4f} | "
-                  f"LR: {learning_rate:.2e} | "
-                  f"Throughput: {throughput:.1f} tok/s | "
-                  f"{gpu_info} | "
-                  f"ETA: {timedelta(seconds=int(eta))}")
-
-    def log_validation(self, epoch: int, val_loss: float, val_perplexity: float):
-        """Log validation metrics"""
-        self.val_losses.append(val_loss)
-
-        print(f"\n  ✅ Validation Results:")
-        print(f"     Loss: {val_loss:.4f}")
-        print(f"     Perplexity: {val_perplexity:.2f}")
-        print()
-
-    def end_epoch(self, epoch: int, avg_train_loss: float):
-        """End epoch logging"""
-        epoch_time = time.time() - self.epoch_start_time
-
-        print(f"\n  📊 Epoch {epoch} Summary:")
-        print(f"     Duration: {timedelta(seconds=int(epoch_time))}")
-        print(f"     Avg Train Loss: {avg_train_loss:.4f}")
-        print(
-            f"     Train Perplexity: {math.exp(min(avg_train_loss, 10)):.2f}")
-
-    def save_logs(self, final_stats: Dict):
-        """Save training logs to file"""
-        log_data = {
-            'config': self.config.__dict__,
-            'training_time': time.time() - self.start_time,
-            'final_stats': final_stats,
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'learning_rates': self.learning_rates,
-            'timestamp': datetime.now().isoformat()
-        }
-
-        try:
-            with open(self.config.log_path, 'w') as f:
-                json.dump(log_data, f, indent=2)
-            print(f"📝 Training logs saved: {self.config.log_path}")
-        except Exception as e:
-            print(f"⚠️ Failed to save logs: {e}")
-
+class BSOptimizer:
+    """
+    Binary Spiking Online (BSO) Optimizer
+    ICML 2025 Algorithm Implementation
+    """
+    
+    def __init__(self, model_params, lr=1e-3, threshold=1e-6, 
+                 beta1=0.9, beta2=0.999, eps=1e-8, adaptive_threshold=True):
+        self.params = list(model_params)
+        self.lr = lr
+        self.threshold = threshold
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps = eps
+        self.adaptive_threshold = adaptive_threshold
+        
+        # État de l'optimiseur
+        self.state = {}
+        self.step_count = 0
+        self.memory_saved = 0
+        self.total_params = 0
+        
+        # Initialisation des états
+        for param in self.params:
+            if param.requires_grad:
+                self.state[param] = {
+                    'exp_avg': torch.zeros_like(param.data),
+                    'exp_avg_sq': torch.zeros_like(param.data),
+                    'binary_mask': torch.ones_like(param.data, dtype=torch.bool),
+                    'flip_signal': torch.zeros_like(param.data),
+                    'accumulated_grad': torch.zeros_like(param.data)
+                }
+                self.total_params += param.numel()
+    
+    def step(self):
+        """Étape d'optimisation BSO"""
+        self.step_count += 1
+        memory_saved_step = 0
+        
+        for param in self.params:
+            if param.grad is None or not param.requires_grad:
+                continue
+                
+            state = self.state[param]
+            grad = param.grad.data
+            
+            # Accumulation des gradients
+            state['accumulated_grad'].add_(grad)
+            
+            # Mise à jour des moyennes exponentielles
+            state['exp_avg'].mul_(self.beta1).add_(grad, alpha=1-self.beta1)
+            state['exp_avg_sq'].mul_(self.beta2).addcmul_(grad, grad, value=1-self.beta2)
+            
+            # Correction de biais
+            bias_correction1 = 1 - self.beta1 ** self.step_count
+            bias_correction2 = 1 - self.beta2 ** self.step_count
+            
+            corrected_exp_avg = state['exp_avg'] / bias_correction1
+            corrected_exp_avg_sq = state['exp_avg_sq'] / bias_correction2
+            
+            # Calcul du signal de flip BSO
+            denom = corrected_exp_avg_sq.sqrt().add_(self.eps)
+            step_size = self.lr / denom
+            
+            # Seuil adaptatif
+            current_threshold = self.threshold
+            if self.adaptive_threshold:
+                current_threshold = self.threshold * (1 + 0.1 * torch.tanh(
+                    torch.tensor(self.step_count / 1000.0)
+                ))
+            
+            # Détection des poids à binariser
+            flip_candidates = torch.abs(corrected_exp_avg) > current_threshold
+            
+            # Signal de flip binaire
+            state['flip_signal'] = torch.where(
+                flip_candidates,
+                torch.sign(corrected_exp_avg),
+                torch.zeros_like(corrected_exp_avg)
+            )
+            
+            # Mise à jour des paramètres
+            param.data.add_(corrected_exp_avg, alpha=-step_size)
+            
+            # Application du masque binaire pour économies mémoire
+            binary_update = torch.abs(state['flip_signal']) > 0
+            state['binary_mask'] = state['binary_mask'] | binary_update
+            
+            # Comptage des économies mémoire
+            memory_saved_step += binary_update.sum().item()
+        
+        self.memory_saved += memory_saved_step
+        return memory_saved_step
+    
+    def zero_grad(self):
+        """Remet à zéro les gradients"""
+        for param in self.params:
+            if param.grad is not None:
+                param.grad.zero_()
+    
+    def get_memory_savings(self):
+        """Calcule les économies mémoire"""
+        if self.total_params == 0:
+            return 0.0, 0.0
+        
+        savings_ratio = self.memory_saved / (self.total_params * self.step_count + 1e-8)
+        savings_mb = (self.memory_saved * 4) / (1024 * 1024)  # 4 bytes par float32
+        return savings_ratio * 100, savings_mb
 
 class DuduxTrainer:
-    """Professional trainer for DUDUX-GPT binary neural architecture"""
-
+    """Gestionnaire d'entraînement principal pour DUDUX-GPT"""
+    
     def __init__(self, config: TrainingConfig):
         self.config = config
-        self.device = self._setup_device()
-        self.logger = TrainingLogger(config)
-
-        # Initialize components
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Configuration du logging
+        self.setup_logging()
+        
+        # Initialisation des composants
         self.tokenizer = None
         self.model = None
         self.optimizer = None
         self.scheduler = None
-        self.scaler = None
-
-        # Training state
-        self.global_step = 0
+        self.train_loader = None
+        self.val_loader = None
+        
+        # Métriques d'entraînement
         self.best_val_loss = float('inf')
         self.patience_counter = 0
-
-    def _setup_device(self) -> torch.device:
-        """Setup training device with optimizations"""
-        if self.config.device == "auto":
-            device = torch.device(
-                'cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            device = torch.device(self.config.device)
-
-        print(f"🖥️ Device Setup:")
-        print(f"   Device: {device}")
-
-        if device.type == "cuda":
-            print(f"   GPU: {torch.cuda.get_device_name()}")
-            print(
-                f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-
-            # Clear cache and optimize
-            torch.cuda.empty_cache()
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cudnn.deterministic = False
-
-        return device
-
-    def setup_tokenizer(self):
-        """Initialize DUDUX tokenizer"""
-        print(f"\n🔤 Initializing Tokenizer...")
-
+        self.global_step = 0
+        self.start_time = time.time()
+        
+        # Gestion des interruptions
+        signal.signal(signal.SIGINT, self.signal_handler)
+        
+        # Mixed precision
+        self.scaler = GradScaler() if config.mixed_precision else None
+    
+    def setup_logging(self):
+        """Configuration du système de logging"""
+        os.makedirs(os.path.dirname(self.config.log_path), exist_ok=True)
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s | %(levelname)s | %(message)s',
+            handlers=[
+                logging.FileHandler(self.config.log_path),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+    
+    def signal_handler(self, signum, frame):
+        """Gestionnaire d'interruption propre"""
+        self.logger.info("🛑 Interruption détectée, sauvegarde en cours...")
+        if self.model is not None:
+            self.save_checkpoint("model/dudux_interrupted.pth")
+        exit(0)
+    
+    def initialize_components(self):
+        """Initialise tous les composants d'entraînement"""
+        self.logger.info("🚀 DUDUX-GPT Professional Training")
+        self.logger.info("Version 5.0.0 | August 5, 2025")
+        self.logger.info("=" * 60)
+        
+        # GPU Info
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name()
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
+            self.logger.info(f"🖥️ Device: {gpu_name}")
+            self.logger.info(f"💾 VRAM: {gpu_memory:.1f} GB")
+        
+        # Tokenizer
+        self.logger.info("🔤 Initializing Tokenizer...")
         self.tokenizer = DuduxTokenizer(
             encoding_name="cl100k_base",
             max_length=self.config.max_seq_len,
-            device=self.device,
-            verbose=True
+            device=self.device
         )
-
-    def setup_model(self):
-        """Initialize DUDUX-GPT model"""
-        print(f"\n🧠 Initializing DUDUX-GPT Model...")
-
+        self.logger.info(f"✅ Tokenizer ready: {self.tokenizer.vocab_size:,} tokens")
+        
+        # Model
+        self.logger.info("🧠 Initializing Model...")
         self.model = DuduxGPT(
             vocab_size=self.config.vocab_size,
             d_model=self.config.d_model,
             num_layers=self.config.num_layers,
             num_heads=self.config.num_heads,
-            ff_multiplier=4,
-            max_seq_len=self.config.max_seq_len,
-            dropout=self.config.dropout
-        )
-
-        # Move to device
-        self.model = self.model.to(self.device)
-
-        # Compile model for speed (PyTorch 2.0+)
-        if self.config.compile_model:
-            try:
-                self.model = torch.compile(self.model)
-                print(f"   ⚡ Model compiled for optimization")
-            except Exception as e:
-                print(f"   ⚠️ Model compilation failed: {e}")
-
-    def setup_optimizer(self):
-        """Setup optimizer and scheduler"""
-        print(f"\n⚡ Setting up Optimizer...")
-
-        # Create optimizer
-        if self.config.optimizer.lower() == "adamw":
-            self.optimizer = optim.AdamW(
-                self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-                betas=(0.9, 0.95),
-                eps=1e-8
-            )
-        elif self.config.optimizer.lower() == "adam":
-            self.optimizer = optim.Adam(
-                self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay
-            )
-        else:
-            self.optimizer = optim.SGD(
-                self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-                momentum=0.9
-            )
-
-        # Setup learning rate scheduler
-        if self.config.scheduler.lower() == "cosine":
-            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer,
-                T_max=self.config.num_epochs,
-                eta_min=self.config.learning_rate * 0.1
-            )
-        elif self.config.scheduler.lower() == "linear":
-            self.scheduler = optim.lr_scheduler.LinearLR(
-                self.optimizer,
-                start_factor=0.1,
-                total_iters=self.config.warmup_steps
-            )
-
-        # Setup mixed precision scaler
-        if self.config.mixed_precision and self.device.type == "cuda":
-            self.scaler = torch.cuda.amp.GradScaler()
-            print(f"   🎯 Mixed precision enabled")
-
-        print(f"   Optimizer: {self.config.optimizer}")
-        print(f"   Scheduler: {self.config.scheduler}")
-        print(f"   Learning Rate: {self.config.learning_rate}")
-
-    def setup_dataset(self):
-        """Setup dataset and data loaders"""
-        print(f"\n📂 Setting up Dataset...")
-
-        # Check if dataset exists, create sample if not
-        if not os.path.exists(self.config.dataset_path):
-            print(f"   Dataset not found, creating sample dataset...")
-            self.config.dataset_path = create_sample_dataset()
-
-        # Initialize dataset manager
-        dataset_manager = DatasetManager(self.tokenizer, verbose=True)
-
-        # Create dataset config
+            max_seq_len=self.config.max_seq_len
+        ).to(self.device)
+        
+        total_params = sum(p.numel() for p in self.model.parameters())
+        self.logger.info(f"✅ Model ready: {total_params:,} parameters")
+        
+        # Dataset
+        self.logger.info("📂 Loading Dataset...")
+        from dataset import DatasetConfig
+        
         dataset_config = DatasetConfig(
             file_path=self.config.dataset_path,
             max_input_length=self.config.max_input_length,
-            max_output_length=self.config.max_output_length,
-            batch_size=self.config.batch_size,
-            validation_split=self.config.validation_split,
-            shuffle=True
+            max_output_length=self.config.max_output_length
         )
-
-        # Load dataset
-        train_dataset, val_dataset = dataset_manager.load_dataset(
-            'main', dataset_config)
-
-        # Create data loaders
-        self.train_loader, self.val_loader = dataset_manager.create_data_loaders(
-            'main',
-            train_batch_size=self.config.batch_size,
-            val_batch_size=self.config.batch_size,
-            num_workers=4
+        
+        dataset = DuduxDataset(
+            dataset_config,
+            self.tokenizer,
+            split='train'
         )
-
-        # Show sample conversations
-        print(f"\n📋 Sample Training Data:")
-        samples = dataset_manager.sample_conversations('main', n=3)
-        for i, (inp, out) in enumerate(samples, 1):
-            inp_preview = inp[:60] + "..." if len(inp) > 60 else inp
-            out_preview = out[:60] + "..." if len(out) > 60 else out
-            print(f"   {i}. Q: {inp_preview}")
-            print(f"      A: {out_preview}")
-
-    def train_step(self, batch: Dict[str, torch.Tensor]) -> float:
-        """Execute single training step"""
-        self.model.train()
-
-        # Batch already on correct device from dataset
-        input_ids = batch['input_ids']
-        labels = batch['labels']
-        attention_mask = batch['attention_mask']
-
-        # Ensure tensors are on correct device (safety check)
-        if input_ids.device != self.device:
-            input_ids = input_ids.to(self.device)
-            labels = labels.to(self.device)
-            attention_mask = attention_mask.to(self.device)
-
-        # Forward pass with mixed precision
-        if self.config.mixed_precision and self.scaler:
-            with torch.cuda.amp.autocast():
-                logits = self.model(input_ids, attention_mask)
-                loss = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)(
-                    logits.view(-1, logits.size(-1)), labels.view(-1)
-                )
+        
+        # Data split
+        train_size = max(1, int(0.9 * len(dataset)))
+        val_size = max(0, len(dataset) - train_size)
+        
+        if val_size == 0:
+            # Si pas assez de données, on utilise tout pour l'entraînement
+            train_dataset = dataset
+            val_dataset = dataset  # On utilise le même dataset pour validation
+            self.logger.info("⚠️ Not enough data for validation split, using training data")
         else:
-            logits = self.model(input_ids, attention_mask)
-            loss = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)(
-                logits.view(-1, logits.size(-1)), labels.view(-1)
+            train_dataset, val_dataset = torch.utils.data.random_split(
+                dataset, [train_size, val_size]
             )
-
-        # Scale loss for gradient accumulation
-        loss = loss / self.config.gradient_accumulation_steps
-
-        # Backward pass
+        
+        self.train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            num_workers=2,
+            pin_memory=True
+        )
+        
+        self.val_loader = DataLoader(
+            val_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            num_workers=2,
+            pin_memory=True
+        )
+        
+        self.logger.info(f"✅ Dataset ready: {len(train_dataset)} train, {len(val_dataset)} val")
+        
+        # Optimizer
+        self.logger.info("⚡ Setting up BSO Optimizer...")
+        if self.config.optimizer.lower() == "bso":
+            self.optimizer = BSOptimizer(
+                self.model.parameters(),
+                lr=self.config.learning_rate,
+                threshold=self.config.bso_threshold,
+                beta1=self.config.bso_beta1,
+                beta2=self.config.bso_beta2,
+                adaptive_threshold=self.config.bso_adaptive_threshold
+            )
+        else:
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=self.config.learning_rate,
+                weight_decay=0.01
+            )
+        
+        # Scheduler
+        self.scheduler = None  # Le BSOptimizer gère son propre learning rate
+        if not isinstance(self.optimizer, BSOptimizer):
+            total_steps = len(self.train_loader) * self.config.num_epochs
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=total_steps
+            )
+        
+        self.logger.info("✅ Training setup complete!")
+        self.logger.info("=" * 60)
+    
+    def train_step(self, batch):
+        """Étape d'entraînement"""
+        input_ids = batch['input_ids'].to(self.device)
+        attention_mask = batch['attention_mask'].to(self.device)
+        labels = batch['labels'].to(self.device)
+        
         if self.config.mixed_precision and self.scaler:
+            with autocast():
+                logits = self.model(input_ids, attention_mask)
+                # Décalage pour prédiction du token suivant
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                
+                loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100
+                )
+            
             self.scaler.scale(loss).backward()
         else:
+            logits = self.model(input_ids, attention_mask)
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=-100
+            )
             loss.backward()
-
-        return loss.item() * self.config.gradient_accumulation_steps
-
-    def validation_step(self) -> Tuple[float, float]:
-        """Execute validation step"""
+        
+        return loss.item()
+    
+    def validate(self):
+        """Validation du modèle"""
         self.model.eval()
-        total_loss = 0.0
-        total_tokens = 0
-
+        total_loss = 0
+        num_batches = 0
+        
         with torch.no_grad():
             for batch in self.val_loader:
-                # Batch already on correct device from dataset
-                input_ids = batch['input_ids']
-                labels = batch['labels']
-                attention_mask = batch['attention_mask']
-
-                # Ensure tensors are on correct device (safety check)
-                if input_ids.device != self.device:
-                    input_ids = input_ids.to(self.device)
-                    labels = labels.to(self.device)
-                    attention_mask = attention_mask.to(self.device)
-
-                # Forward pass
+                input_ids = batch['input_ids'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+                labels = batch['labels'].to(self.device)
+                
                 if self.config.mixed_precision:
-                    with torch.cuda.amp.autocast():
+                    with autocast():
                         logits = self.model(input_ids, attention_mask)
-                        loss = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)(
-                            logits.view(-1, logits.size(-1)), labels.view(-1)
+                        shift_logits = logits[..., :-1, :].contiguous()
+                        shift_labels = labels[..., 1:].contiguous()
+                        
+                        loss = F.cross_entropy(
+                            shift_logits.view(-1, shift_logits.size(-1)),
+                            shift_labels.view(-1),
+                            ignore_index=-100
                         )
                 else:
                     logits = self.model(input_ids, attention_mask)
-                    loss = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)(
-                        logits.view(-1, logits.size(-1)), labels.view(-1)
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = labels[..., 1:].contiguous()
+                    
+                    loss = F.cross_entropy(
+                        shift_logits.view(-1, shift_logits.size(-1)),
+                        shift_labels.view(-1),
+                        ignore_index=-100
                     )
-
-                # Accumulate metrics
-                valid_tokens = (
-                    labels != self.tokenizer.pad_token_id).sum().item()
-                total_loss += loss.item() * valid_tokens
-                total_tokens += valid_tokens
-
-        avg_loss = total_loss / \
-            total_tokens if total_tokens > 0 else float('inf')
-        perplexity = math.exp(min(avg_loss, 10))  # Clamp to prevent overflow
-
-        return avg_loss, perplexity
-
-    def save_checkpoint(self, epoch: int, val_loss: float, is_best: bool = False):
-        """Save model checkpoint"""
+                
+                total_loss += loss.item()
+                num_batches += 1
+        
+        self.model.train()
+        return total_loss / max(num_batches, 1)
+    
+    def save_checkpoint(self, path):
+        """Sauvegarde du modèle"""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
         checkpoint = {
-            'epoch': epoch,
-            'global_step': self.global_step,
             'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'config': self.config.__dict__,
-            'val_loss': val_loss,
-            'tokenizer_config': self.tokenizer.get_vocab_info(),
-            'timestamp': datetime.now().isoformat()
+            'global_step': self.global_step,
+            'best_val_loss': self.best_val_loss
         }
-
-        if self.scaler:
-            checkpoint['scaler_state_dict'] = self.scaler.state_dict()
-
-        # Save checkpoint
-        if is_best:
-            save_path = self.config.save_path
-        else:
-            save_path = self.config.save_path.replace(
-                '.pth', f'_checkpoint_epoch_{epoch}.pth')
-
-        torch.save(checkpoint, save_path)
-        print(f"💾 {'Best model' if is_best else 'Checkpoint'} saved: {save_path}")
-
+        
+        torch.save(checkpoint, path)
+        self.logger.info(f"💾 Model saved: {path}")
+    
     def train(self):
-        """Main training loop"""
-        try:
-            # Setup all components
-            self.setup_tokenizer()
-            self.setup_model()
-            self.setup_optimizer()
-            self.setup_dataset()
-
-            # Calculate training steps
-            steps_per_epoch = len(self.train_loader)
-            total_steps = steps_per_epoch * self.config.num_epochs
-
-            # Start training
-            model_params = sum(p.numel() for p in self.model.parameters())
-            self.logger.start_training(total_steps, model_params)
-
-            # Training loop
-            for epoch in range(1, self.config.num_epochs + 1):
-                self.logger.epoch_start_time = time.time()
-                epoch_loss = 0.0
-                self.optimizer.zero_grad()
-
-                for step, batch in enumerate(self.train_loader, 1):
-                    step_start_time = time.time()
-
-                    # Training step
-                    loss = self.train_step(batch)
-                    epoch_loss += loss
-
-                    # Gradient accumulation
-                    if step % self.config.gradient_accumulation_steps == 0:
-                        # Gradient clipping
-                        if self.config.mixed_precision and self.scaler:
-                            self.scaler.unscale_(self.optimizer)
-                            torch.nn.utils.clip_grad_norm_(
-                                self.model.parameters(), self.config.max_grad_norm)
-                            self.scaler.step(self.optimizer)
-                            self.scaler.update()
-                        else:
-                            torch.nn.utils.clip_grad_norm_(
-                                self.model.parameters(), self.config.max_grad_norm)
+        """Boucle d'entraînement principale"""
+        self.initialize_components()
+        
+        self.logger.info("🚀 TRAINING STARTED")
+        self.logger.info("=" * 60)
+        
+        for epoch in range(self.config.num_epochs):
+            self.model.train()
+            epoch_loss = 0
+            num_batches = 0
+            
+            for batch_idx, batch in enumerate(self.train_loader):
+                # Étape d'entraînement
+                loss = self.train_step(batch)
+                epoch_loss += loss
+                num_batches += 1
+                
+                # Accumulation de gradients
+                if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
+                    if self.config.mixed_precision and self.scaler:
+                        self.scaler.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), 
+                            self.config.max_grad_norm
+                        )
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), 
+                            self.config.max_grad_norm
+                        )
+                        if hasattr(self.optimizer, 'step'):
                             self.optimizer.step()
-
-                        self.optimizer.zero_grad()
-                        self.global_step += 1
-
-                    # Calculate throughput
-                    step_time = time.time() - step_start_time
-                    tokens_per_second = (
-                        batch['input_ids'].numel() / step_time) if step_time > 0 else 0
-
-                    # Log progress
-                    current_lr = self.optimizer.param_groups[0]['lr']
-                    self.logger.log_step(
-                        epoch, step, self.global_step, loss, current_lr, tokens_per_second
-                    )
-
-                    # Validation
-                    if self.global_step % self.config.eval_every == 0:
-                        val_loss, val_perplexity = self.validation_step()
-                        self.logger.log_validation(
-                            epoch, val_loss, val_perplexity)
-
-                        # Check for improvement
-                        if val_loss < self.best_val_loss:
-                            self.best_val_loss = val_loss
-                            self.patience_counter = 0
-                            self.save_checkpoint(epoch, val_loss, is_best=True)
                         else:
-                            self.patience_counter += 1
-
-                        # Early stopping
+                            self.optimizer.step()
+                    
+                    self.optimizer.zero_grad()
+                    
+                    if self.scheduler and hasattr(self.scheduler, 'step'):
+                        self.scheduler.step()
+                    
+                    self.global_step += 1
+                
+                # Validation périodique
+                if self.global_step % self.config.eval_every == 0:
+                    val_loss = self.validate()
+                    
+                    # Métriques BSO
+                    if isinstance(self.optimizer, BSOptimizer):
+                        savings_pct, savings_mb = self.optimizer.get_memory_savings()
+                        self.logger.info(
+                            f"Epoch {epoch+1}/{self.config.num_epochs} | "
+                            f"Step {self.global_step} | "
+                            f"Train Loss: {loss:.4f} | "
+                            f"Val Loss: {val_loss:.4f} | "
+                            f"BSO Savings: {savings_pct:.2f}% ({savings_mb:.1f}MB)"
+                        )
+                    else:
+                        self.logger.info(
+                            f"Epoch {epoch+1}/{self.config.num_epochs} | "
+                            f"Step {self.global_step} | "
+                            f"Train Loss: {loss:.4f} | "
+                            f"Val Loss: {val_loss:.4f}"
+                        )
+                    
+                    # Early stopping
+                    if val_loss < self.best_val_loss - self.config.early_stopping_threshold:
+                        self.best_val_loss = val_loss
+                        self.patience_counter = 0
+                        self.save_checkpoint(self.config.model_save_path)
+                    else:
+                        self.patience_counter += 1
                         if self.patience_counter >= self.config.early_stopping_patience:
-                            print(
-                                f"\n🛑 Early stopping triggered after {self.patience_counter} evaluations without improvement")
-                            break
-
-                    # Save checkpoint
-                    if self.global_step % self.config.save_every == 0:
-                        val_loss, _ = self.validation_step()
-                        self.save_checkpoint(epoch, val_loss, is_best=False)
-
-                # End epoch
-                avg_epoch_loss = epoch_loss / len(self.train_loader)
-                self.logger.end_epoch(epoch, avg_epoch_loss)
-
-                # Update scheduler
-                if self.scheduler:
-                    self.scheduler.step()
-
-                # Early stopping check
-                if self.patience_counter >= self.config.early_stopping_patience:
-                    break
-
-            # Final validation and save
-            print(f"\n🏁 Training completed!")
-            final_val_loss, final_perplexity = self.validation_step()
-
-            final_stats = {
-                'total_steps': self.global_step,
-                'final_train_loss': avg_epoch_loss,
-                'final_val_loss': final_val_loss,
-                'final_perplexity': final_perplexity,
-                'model_parameters': model_params,
-                'best_val_loss': self.best_val_loss
-            }
-
-            self.logger.save_logs(final_stats)
-
-            print(f"📊 Final Results:")
-            print(f"   Best Validation Loss: {self.best_val_loss:.4f}")
-            print(f"   Final Validation Loss: {final_val_loss:.4f}")
-            print(f"   Final Perplexity: {final_perplexity:.2f}")
-
-        except KeyboardInterrupt:
-            print(f"\n⚠️ Training interrupted by user")
-            if hasattr(self, 'model') and self.model is not None:
-                self.save_checkpoint(epoch, float('inf'), is_best=False)
-        except Exception as e:
-            print(f"\n❌ Training error: {e}")
-            raise
-
+                            self.logger.info("🛑 Early stopping triggered")
+                            return
+            
+            # Log de fin d'époque
+            avg_epoch_loss = epoch_loss / max(num_batches, 1)
+            elapsed_time = time.time() - self.start_time
+            self.logger.info(
+                f"✅ Epoch {epoch+1} complete | "
+                f"Avg Loss: {avg_epoch_loss:.4f} | "
+                f"Time: {elapsed_time/60:.1f}min"
+            )
+        
+        self.logger.info("🎉 Training completed successfully!")
+        
+        # Sauvegarde finale
+        if isinstance(self.optimizer, BSOptimizer):
+            savings_pct, savings_mb = self.optimizer.get_memory_savings()
+            self.logger.info(f"🎯 Final BSO Memory Savings: {savings_pct:.2f}% ({savings_mb:.1f}MB)")
 
 def main():
-    """Main training function"""
-    print(f"🧠 DUDUX-GPT Professional Training")
-    print(f"Version 4.0.0 | August 5, 2025")
-    print(f"{'='*60}")
-
-    # Optimized training configuration for GTX 1650 4GB
-    config = TrainingConfig(
-        # Model parameters (optimized for GTX 1650)
-        vocab_size=100277,
-        d_model=1024,
-        num_layers=32,
-        num_heads=32,
-        max_seq_len=1024,  # Reduced for memory efficiency
-
-        # Training parameters
-        num_epochs=3,
-        learning_rate=2e-4,
-        batch_size=2,  # Small batch for 4GB GPU
-        gradient_accumulation_steps=8,  # Effective batch size = 16
-
-        # Optimization
-        mixed_precision=True,
-        warmup_steps=500,
-
-        # Paths
-        dataset_path="data/conversations.txt",
-        save_path="model/dudux_trained.pth",
-        log_path="logs/training.log"
-    )
-
-    # Initialize and start training
-    trainer = DuduxTrainer(config)
-    trainer.train()
-
+    """Fonction principale"""
+    try:
+        # Configuration optimisée pour GTX 1650
+        config = TrainingConfig()
+        
+        # Entraînement
+        trainer = DuduxTrainer(config)
+        trainer.train()
+        
+    except Exception as e:
+        logging.error(f"❌ Training error: {e}")
+        raise
 
 if __name__ == "__main__":
     main()

@@ -1,62 +1,65 @@
-{
-  "config": {
-    "dataset_path": "data/conversations.txt",
-    "model_save_path": "model/dudux.pth",
-    "log_path": "logs/training.log",
-    "n_neurons": 100000,
-    "pattern_dim": 4096,
-    "memory_size": 50000,
-    "num_epochs": 5,
-    "similarity_threshold": 0.3,
-    "log_every": 5,
-    "save_every": 50,
-    "enable_checkpoints": false,
-    "device": "auto"
-  },
-  "total_time": 342.9941461086273,
-  "final_stats": {
-    "total_neurons": 100000,
-    "pattern_dimension": 4096,
-    "stored_experiences": 670,
-    "memory_capacity": 50000,
-    "device": "cuda",
-    "total_parameters": 587763456
-  },
-  "epochs": [
-    {
-      "epoch": 1,
-      "duration": 60.529152393341064,
-      "patterns_stored": 134,
-      "recall_rate": 1.0,
-      "timestamp": "2025-08-05T02:40:00.176500"
-    },
-    {
-      "epoch": 2,
-      "duration": 63.513800859451294,
-      "patterns_stored": 268,
-      "recall_rate": 0.9615384615384616,
-      "timestamp": "2025-08-05T02:41:05.319136"
-    },
-    {
-      "epoch": 3,
-      "duration": 64.96367001533508,
-      "patterns_stored": 402,
-      "recall_rate": 0.9743589743589743,
-      "timestamp": "2025-08-05T02:42:12.033718"
-    },
-    {
-      "epoch": 4,
-      "duration": 61.6179313659668,
-      "patterns_stored": 536,
-      "recall_rate": 0.9807692307692307,
-      "timestamp": "2025-08-05T02:43:15.381660"
-    },
-    {
-      "epoch": 5,
-      "duration": 64.0094223022461,
-      "patterns_stored": 670,
-      "recall_rate": 0.9846153846153847,
-      "timestamp": "2025-08-05T02:44:21.155053"
-    }
-  ]
-}
+2025-08-05 15:59:17,044 | INFO | 🚀 DUDUX-GPT Professional Training
+2025-08-05 15:59:17,044 | INFO | Version 5.0.0 | August 5, 2025
+2025-08-05 15:59:17,044 | INFO | ============================================================
+2025-08-05 15:59:17,068 | INFO | 🖥️ Device: NVIDIA GeForce GTX 1650
+2025-08-05 15:59:17,068 | INFO | 💾 VRAM: 3.9 GB
+2025-08-05 15:59:17,068 | INFO | 🔤 Initializing Tokenizer...
+2025-08-05 15:59:17,068 | ERROR | ❌ Training error: DuduxTokenizer.__init__() got an unexpected keyword argument 'encoding'
+2025-08-05 16:02:55,277 | INFO | 🚀 DUDUX-GPT Professional Training
+2025-08-05 16:02:55,277 | INFO | Version 5.0.0 | August 5, 2025
+2025-08-05 16:02:55,278 | INFO | ============================================================
+2025-08-05 16:02:55,302 | INFO | 🖥️ Device: NVIDIA GeForce GTX 1650
+2025-08-05 16:02:55,302 | INFO | 💾 VRAM: 3.9 GB
+2025-08-05 16:02:55,302 | INFO | 🔤 Initializing Tokenizer...
+2025-08-05 16:02:55,494 | INFO | ✅ Tokenizer ready: 100,277 tokens
+2025-08-05 16:02:55,494 | INFO | 🧠 Initializing Model...
+2025-08-05 16:02:57,416 | INFO | ✅ Model ready: 98,407,350 parameters
+2025-08-05 16:02:57,417 | INFO | 📂 Loading Dataset...
+2025-08-05 16:02:57,419 | INFO | ✅ Dataset ready: 89 train, 10 val
+2025-08-05 16:02:57,420 | INFO | ⚡ Setting up BSO Optimizer...
+2025-08-05 16:02:57,451 | ERROR | ❌ Training error: NoneType is not an Optimizer
+2025-08-05 16:05:07,570 | INFO | 🚀 DUDUX-GPT Professional Training
+2025-08-05 16:05:07,570 | INFO | Version 5.0.0 | August 5, 2025
+2025-08-05 16:05:07,570 | INFO | ============================================================
+2025-08-05 16:05:07,610 | INFO | 🖥️ Device: NVIDIA GeForce GTX 1650
+2025-08-05 16:05:07,611 | INFO | 💾 VRAM: 3.9 GB
+2025-08-05 16:05:07,611 | INFO | 🔤 Initializing Tokenizer...
+2025-08-05 16:05:07,808 | INFO | ✅ Tokenizer ready: 100,277 tokens
+2025-08-05 16:05:07,808 | INFO | 🧠 Initializing Model...
+2025-08-05 16:05:09,709 | INFO | ✅ Model ready: 98,407,350 parameters
+2025-08-05 16:05:09,710 | INFO | 📂 Loading Dataset...
+2025-08-05 16:05:09,714 | INFO | ✅ Dataset ready: 89 train, 10 val
+2025-08-05 16:05:09,714 | INFO | ⚡ Setting up BSO Optimizer...
+2025-08-05 16:05:09,744 | INFO | ✅ Training setup complete!
+2025-08-05 16:05:09,744 | INFO | ============================================================
+2025-08-05 16:05:09,744 | INFO | 🚀 TRAINING STARTED
+2025-08-05 16:05:09,744 | INFO | ============================================================
+2025-08-05 16:05:10,509 | ERROR | ❌ Training error: CUDA out of memory. Tried to allocate 196.00 MiB. GPU 0 has a total capacity of 3.62 GiB of which 152.94 MiB is free. Including non-PyTorch memory, this process has 2.94 GiB memory in use. Of the allocated memory 2.69 GiB is allocated by PyTorch, and 183.78 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+2025-08-05 16:06:18,072 | INFO | 🚀 DUDUX-GPT Professional Training
+2025-08-05 16:06:18,072 | INFO | Version 5.0.0 | August 5, 2025
+2025-08-05 16:06:18,072 | INFO | ============================================================
+2025-08-05 16:06:18,104 | INFO | 🖥️ Device: NVIDIA GeForce GTX 1650
+2025-08-05 16:06:18,104 | INFO | 💾 VRAM: 3.9 GB
+2025-08-05 16:06:18,104 | INFO | 🔤 Initializing Tokenizer...
+2025-08-05 16:06:18,305 | INFO | ✅ Tokenizer ready: 100,277 tokens
+2025-08-05 16:06:18,305 | INFO | 🧠 Initializing Model...
+2025-08-05 16:06:19,512 | INFO | ✅ Model ready: 57,760,694 parameters
+2025-08-05 16:06:19,512 | INFO | 📂 Loading Dataset...
+2025-08-05 16:06:19,514 | ERROR | ❌ Training error: num_samples should be a positive integer value, but got num_samples=0
+2025-08-05 16:07:24,285 | INFO | 🚀 DUDUX-GPT Professional Training
+2025-08-05 16:07:24,285 | INFO | Version 5.0.0 | August 5, 2025
+2025-08-05 16:07:24,285 | INFO | ============================================================
+2025-08-05 16:07:24,313 | INFO | 🖥️ Device: NVIDIA GeForce GTX 1650
+2025-08-05 16:07:24,313 | INFO | 💾 VRAM: 3.9 GB
+2025-08-05 16:07:24,314 | INFO | 🔤 Initializing Tokenizer...
+2025-08-05 16:07:24,553 | INFO | ✅ Tokenizer ready: 100,277 tokens
+2025-08-05 16:07:24,554 | INFO | 🧠 Initializing Model...
+2025-08-05 16:07:25,725 | INFO | ✅ Model ready: 57,760,694 parameters
+2025-08-05 16:07:25,725 | INFO | 📂 Loading Dataset...
+2025-08-05 16:07:25,728 | INFO | ✅ Dataset ready: 1 train, 1 val
+2025-08-05 16:07:25,728 | INFO | ⚡ Setting up BSO Optimizer...
+2025-08-05 16:07:25,750 | INFO | ✅ Training setup complete!
+2025-08-05 16:07:25,750 | INFO | ============================================================
+2025-08-05 16:07:25,750 | INFO | 🚀 TRAINING STARTED
+2025-08-05 16:07:25,750 | INFO | ============================================================
+2025-08-05 16:07:25,859 | ERROR | ❌ Training error: The size of tensor a (159) must match the size of tensor b (128) at non-singleton dimension 1

@@ -45,15 +45,20 @@ class BinaryNeuron(nn.Module):
         self.bias = nn.Parameter(torch.randn(1) * 0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Binary forward pass with straight-through gradients"""
-        # Binarize weights during forward pass
-        binary_weights = torch.sign(self.weights).clamp(0, 1)
+        """Binary forward pass with proper straight-through gradients"""
+        # Straight-through estimator for binary weights
+        # Forward: binary, Backward: original weights for gradients
+        binary_weights = (self.weights > 0.5).float()
+        binary_weights = binary_weights + self.weights - self.weights.detach()
 
         # Binary weighted sum
         weighted_sum = torch.sum(x * binary_weights, dim=-1) + self.bias
 
-        # Binary activation with straight-through gradient
-        output = (weighted_sum > self.threshold).float()
+        # Straight-through binary activation
+        # Forward: binary (0 or 1), Backward: sigmoid for gradients
+        sigmoid_output = torch.sigmoid(weighted_sum)
+        binary_output = (sigmoid_output > self.threshold).float()
+        output = binary_output + sigmoid_output - sigmoid_output.detach()
 
         return output
 
@@ -77,15 +82,20 @@ class MassiveBinaryLayer(nn.Module):
         self.threshold = threshold
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Efficient batched binary operations"""
-        # Binarize weights
-        binary_weights = torch.sign(self.weight_matrix).clamp(0, 1)
+        """Efficient batched binary operations with proper gradients"""
+        # Straight-through estimator for binary weight matrix
+        binary_weights = (self.weight_matrix > 0.5).float()
+        binary_weights = binary_weights + self.weight_matrix - self.weight_matrix.detach()
 
         # Matrix multiplication with binary weights
         output = torch.matmul(x, binary_weights.T) + self.bias
 
-        # Binary activation
-        return (output > self.threshold).float()
+        # Straight-through binary activation
+        sigmoid_output = torch.sigmoid(output)
+        binary_output = (sigmoid_output > self.threshold).float()
+        result = binary_output + sigmoid_output - sigmoid_output.detach()
+
+        return result
 
 
 class BinaryMultiHeadAttention(nn.Module):
@@ -128,9 +138,12 @@ class BinaryMultiHeadAttention(nn.Module):
         # Binary attention scores (Hamming similarity)
         attention_scores = self.binary_attention_scores(q, k)
 
-        # Apply mask if provided
+        # Apply mask if provided (use compatible value for mixed precision)
         if mask is not None:
-            attention_scores = attention_scores.masked_fill(mask == 0, -1e9)
+            # Use -65504 for fp16 compatibility instead of -1e9
+            mask_value = -65504.0 if attention_scores.dtype == torch.float16 else -1e9
+            attention_scores = attention_scores.masked_fill(
+                mask == 0, mask_value)
 
         # Binary softmax approximation
         attention_weights = self.binary_softmax(attention_scores)

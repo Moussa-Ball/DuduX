@@ -280,12 +280,12 @@ class DuduxDataset(Dataset):
         else:
             sequence_ids = sequence_ids[:max_seq_len]
 
-        # Convert to tensors on the same device as tokenizer
-        device = self.tokenizer.device
+        # Convert to tensors on CPU first (for multiprocessing compatibility)
+        # They will be moved to GPU in the training loop
         input_ids_tensor = torch.tensor(
-            sequence_ids[:-1], dtype=torch.long, device=device)  # Input
+            sequence_ids[:-1], dtype=torch.long)  # Input
         target_ids_tensor = torch.tensor(
-            sequence_ids[1:], dtype=torch.long, device=device)   # Targets (shifted)
+            sequence_ids[1:], dtype=torch.long)   # Targets (shifted)
         attention_mask = (input_ids_tensor !=
                           self.tokenizer.pad_token_id).float()
 
