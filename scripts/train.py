@@ -375,10 +375,16 @@ class DuduxTrainer:
         """Execute single training step"""
         self.model.train()
 
-        # Move batch to device
-        input_ids = batch['input_ids'].to(self.device)
-        labels = batch['labels'].to(self.device)
-        attention_mask = batch['attention_mask'].to(self.device)
+        # Batch already on correct device from dataset
+        input_ids = batch['input_ids']
+        labels = batch['labels']
+        attention_mask = batch['attention_mask']
+
+        # Ensure tensors are on correct device (safety check)
+        if input_ids.device != self.device:
+            input_ids = input_ids.to(self.device)
+            labels = labels.to(self.device)
+            attention_mask = attention_mask.to(self.device)
 
         # Forward pass with mixed precision
         if self.config.mixed_precision and self.scaler:
@@ -412,9 +418,16 @@ class DuduxTrainer:
 
         with torch.no_grad():
             for batch in self.val_loader:
-                input_ids = batch['input_ids'].to(self.device)
-                labels = batch['labels'].to(self.device)
-                attention_mask = batch['attention_mask'].to(self.device)
+                # Batch already on correct device from dataset
+                input_ids = batch['input_ids']
+                labels = batch['labels']
+                attention_mask = batch['attention_mask']
+
+                # Ensure tensors are on correct device (safety check)
+                if input_ids.device != self.device:
+                    input_ids = input_ids.to(self.device)
+                    labels = labels.to(self.device)
+                    attention_mask = attention_mask.to(self.device)
 
                 # Forward pass
                 if self.config.mixed_precision:
