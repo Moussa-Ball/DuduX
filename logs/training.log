@@ -1,0 +1,62 @@
+{
+  "config": {
+    "dataset_path": "data/conversations.txt",
+    "model_save_path": "model/dudux.pth",
+    "log_path": "logs/training.log",
+    "n_neurons": 100000,
+    "pattern_dim": 4096,
+    "memory_size": 50000,
+    "num_epochs": 5,
+    "similarity_threshold": 0.3,
+    "log_every": 5,
+    "save_every": 50,
+    "enable_checkpoints": false,
+    "device": "auto"
+  },
+  "total_time": 342.9941461086273,
+  "final_stats": {
+    "total_neurons": 100000,
+    "pattern_dimension": 4096,
+    "stored_experiences": 670,
+    "memory_capacity": 50000,
+    "device": "cuda",
+    "total_parameters": 587763456
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "duration": 60.529152393341064,
+      "patterns_stored": 134,
+      "recall_rate": 1.0,
+      "timestamp": "2025-08-05T02:40:00.176500"
+    },
+    {
+      "epoch": 2,
+      "duration": 63.513800859451294,
+      "patterns_stored": 268,
+      "recall_rate": 0.9615384615384616,
+      "timestamp": "2025-08-05T02:41:05.319136"
+    },
+    {
+      "epoch": 3,
+      "duration": 64.96367001533508,
+      "patterns_stored": 402,
+      "recall_rate": 0.9743589743589743,
+      "timestamp": "2025-08-05T02:42:12.033718"
+    },
+    {
+      "epoch": 4,
+      "duration": 61.6179313659668,
+      "patterns_stored": 536,
+      "recall_rate": 0.9807692307692307,
+      "timestamp": "2025-08-05T02:43:15.381660"
+    },
+    {
+      "epoch": 5,
+      "duration": 64.0094223022461,
+      "patterns_stored": 670,
+      "recall_rate": 0.9846153846153847,
+      "timestamp": "2025-08-05T02:44:21.155053"
+    }
+  ]
+}
