@@ -118,5 +118,8 @@ if (BUILD_TESTING)
 
   # Small tool to check packed MLP files
   add_executable(dudux_check_packed_mlp tools/check_packed_mlp.cpp)
+  add_executable(dudux_infer_mlp1b tools/infer_mlp1b.cpp)
+  target_include_directories(dudux_infer_mlp1b PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(dudux_infer_mlp1b PRIVATE dudux_core)
   # Optional: we could add an end-to-end export+check test later.
 endif()

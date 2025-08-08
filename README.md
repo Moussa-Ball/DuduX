@@ -110,6 +110,12 @@ Ces outils sont destinés aux smoke tests d’apprentissage binaire (forward str
 Outil de vérification:
 - `dudux_check_packed_mlp /chemin/modele.dx1bmlp IN H OUT` vérifie le fichier (magic, dimensions, taille attendue).
 
+Inférence offline (binaire):
+- `dudux_infer_mlp1b modele.dx1bmlp [--tau-hidden TH] [--tau-out TO] [--input 01STR|@path] [--random N] [--p SPARSITY] [--seed S]`
+  - Exemples:
+    - `./build/dudux_infer_mlp1b /tmp/mlp.dx1bmlp --random 3 --p 0.05`
+    - `./build/dudux_infer_mlp1b /tmp/mlp.dx1bmlp --input 0000100...001`
+
 ## API (aperçu)
 - `NanoAttention1b`:
   - `topk_into(q, k, out)` / `topk_into_candidates(...)` (+ versions stream CUDA)
