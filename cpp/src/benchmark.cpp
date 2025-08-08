@@ -191,11 +191,60 @@ int main(int argc, char** argv) {
     // === Attention binaire (clé=BitVector NBIT, valeur=BitVector VBIT) ===
     {
         NanoAttention1b att(NBIT, VBIT);
+        // Construire K/V et stocker les clés pour un routeur de candidats léger
+        std::vector<BitVector> keys_vec; keys_vec.reserve(NITEMS);
         for (size_t i = 0; i < NITEMS; ++i) {
             auto k = encode_string_bloom(corpus[i], NBIT);
             auto v = encode_string_bloom(std::string("val_") + corpus[i], VBIT);
             att.add(k, v);
+            keys_vec.push_back(k);
         }
+
+        // Index inversé postings: pour chaque bit, la liste des items qui l'ont à 1
+        std::vector<std::vector<size_t>> postings(NBIT);
+        {
+            const size_t words = (NBIT + 63) / 64;
+            for (size_t i = 0; i < keys_vec.size(); ++i) {
+                const uint64_t* w = keys_vec[i].data();
+                for (size_t wi = 0; wi < words; ++wi) {
+                    uint64_t x = w[wi];
+                    while (x) {
+                        unsigned long long t = x & -x;
+                        int b = __builtin_ctzll(x);
+                        size_t pos = wi * 64 + (size_t)b;
+                        if (pos < NBIT) postings[pos].push_back(i);
+                        x ^= t;
+                    }
+                }
+            }
+        }
+
+        auto route_candidates = [&](const BitVector& q, size_t max_cand) {
+            std::vector<size_t> cand; cand.reserve(max_cand);
+            std::vector<uint8_t> seen(NITEMS, 0);
+            const size_t words = (NBIT + 63) / 64;
+            const uint64_t* w = q.data();
+            size_t bits_used = 0, max_bits = 8; // échantillonner 8 bits actifs
+            for (size_t wi = 0; wi < words && bits_used < max_bits; ++wi) {
+                uint64_t x = w[wi];
+                while (x && bits_used < max_bits) {
+                    unsigned long long t = x & -x;
+                    int b = __builtin_ctzll(x);
+                    size_t pos = wi * 64 + (size_t)b;
+                    if (pos < postings.size()) {
+                        const auto& lst = postings[pos];
+                        for (size_t idx : lst) { if (!seen[idx]) { seen[idx] = 1; cand.push_back(idx); if (cand.size() >= max_cand) break; } }
+                        bits_used++;
+                    }
+                    if (cand.size() >= max_cand) break;
+                    x ^= t;
+                }
+            }
+            // Compléter si trop court
+            for (size_t i = 0; cand.size() < max_cand && i < NITEMS; ++i) { if (!seen[i]) { seen[i] = 1; cand.push_back(i); } }
+            if (cand.size() > max_cand) cand.resize(max_cand);
+            return cand;
+        };
         std::vector<std::pair<size_t, uint32_t>> scratch;
         BitVector out(VBIT);
         for (size_t K : Ks) {
@@ -206,9 +255,7 @@ int main(int argc, char** argv) {
                     auto qv = encode_string_bloom(qstr, NBIT);
                     const uint32_t tau = static_cast<uint32_t>((K + 1) / 2); // majorité
                     if (CAND > 0 && CAND < NITEMS) {
-                        // simple gating mock: take the first CAND items as candidates (placeholder for router)
-                        std::vector<size_t> cand(std::min(CAND, NITEMS));
-                        for (size_t i=0;i<cand.size();++i) cand[i]=i;
+                        auto cand = route_candidates(qv, std::min(CAND, NITEMS));
                         scratch.clear();
                         att.topk_into_candidates(qv, K, cand, scratch);
                         att.attend_with_topk(scratch, tau, out);
@@ -252,11 +299,10 @@ int main(int argc, char** argv) {
         // === Multi-Head Attention (H têtes, K/V partagés) ===
         {
             NanoMultiHeadAttention1b mha(HEADS, NBIT, VBIT);
-            // Réutiliser les mêmes K/V
+            // Réutiliser les mêmes K/V (clé depuis keys_vec)
             for (size_t i = 0; i < NITEMS; ++i) {
-                auto k = encode_string_bloom(corpus[i], NBIT);
                 auto v = encode_string_bloom(std::string("val_") + corpus[i], VBIT);
-                mha.add(k, v);
+                mha.add(keys_vec[i], v);
             }
             std::vector<BitVector> q_heads(HEADS, BitVector(NBIT));
             std::vector<BitVector> out_heads;
@@ -272,7 +318,7 @@ int main(int argc, char** argv) {
                         }
                         const uint32_t tau = static_cast<uint32_t>((K + 1) / 2);
                         if (CAND > 0 && CAND < NITEMS) {
-                            std::vector<size_t> cand(std::min(CAND, NITEMS)); for (size_t i=0;i<cand.size();++i) cand[i]=i;
+                            auto cand = route_candidates(base, std::min(CAND, NITEMS));
                             mha.attend_candidates(q_heads, K, tau, cand, out_heads);
                         } else {
                             mha.attend(q_heads, K, tau, out_heads);
