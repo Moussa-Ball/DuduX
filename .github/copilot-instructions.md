@@ -139,3 +139,22 @@ Tests indispensables:
 ---
 
 En un mot: écrire du code simple, binaire, mesuré, et reproductible. Dudux doit rester lisible, testable et prêt pour des déploiements très contraints.
+
+---
+
+### GPU/CUDA (spécifique Dudux)
+- Les chemins critiques d'attention disposent d'un backend CUDA optionnel (DUDUX_ENABLE_CUDA):
+	- Kernels AND+POPC pour scorer q vs K packés en uint64.
+	- Top‑k côté device via Thrust (sort_by_key), copie des k meilleurs vers l’hôte.
+	- Buffers device persistants: clés (K), scores, indices, candidats, q (éviter realloc/copys).
+- Streams CUDA:
+	- API attention accepte un `stream_handle` optionnel pour exécuter sur un flux donné.
+	- MHA propose une exécution multi‑stream (un flux par tête) avec synchro finale pour paralléliser les têtes.
+- Gating/candidats:
+	- Un routeur léger génère un sous‑ensemble de candidats par requête (postings index par bit actif).
+	- L’attention « candidates » ne score que ces indices, réduisant le compute/mémoire.
+
+Guides 4GB VRAM:
+- Préférer NBIT modestes (8–32k) et VBIT compacts (512–2048). K petit (4–16). HEADS 4–8.
+- Activer le gating (CAND 128–512) et réutiliser les buffers device.
+- Éviter les allocations par appel; privilégier des structures persistantes et les copies asynchrones H2D/D2H.

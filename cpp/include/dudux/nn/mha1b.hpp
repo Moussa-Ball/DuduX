@@ -10,6 +10,9 @@
 #include <stdexcept>
 #include "dudux/nn/attention1b.hpp"
 #include "dudux/core/bitvector.hpp"
+#ifdef DUDUX_ENABLE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 namespace dudux { namespace nn {
 
@@ -78,6 +81,31 @@ public:
             att_.topk_into_candidates_stream(q_heads[h], k, candidates, tk, stream_handle);
             att_.attend_with_topk(tk, tau_votes, out_heads[h]);
         }
+    }
+
+    // Exécution multi-stream: un flux CUDA par tête, appels parallèles et synchronisation finale
+    void attend_candidates_multistream(const std::vector<dudux::core::BitVector>& q_heads, size_t k, uint32_t tau_votes,
+                                       const std::vector<size_t>& candidates,
+                                       std::vector<dudux::core::BitVector>& out_heads) const {
+        if (q_heads.size() != H_) throw std::invalid_argument("MHA1b: q_heads size != heads");
+        out_heads.resize(H_);
+        const size_t H = H_;
+        // Créer H flux
+        std::vector<cudaStream_t> streams(H);
+        for (size_t h=0; h<H; ++h) cudaStreamCreateWithFlags(&streams[h], cudaStreamNonBlocking);
+        // Lancer top-k candidats par tête en parallèle
+        std::vector<std::vector<std::pair<size_t,uint32_t>>> tk_heads(H);
+        for (size_t h=0; h<H; ++h) {
+            tk_heads[h].clear();
+            att_.topk_into_candidates_stream(q_heads[h], k, candidates, tk_heads[h], (void*)streams[h]);
+        }
+        // Synchroniser flux et agréger
+        for (size_t h=0; h<H; ++h) cudaStreamSynchronize(streams[h]);
+        for (size_t h=0; h<H; ++h) {
+            att_.attend_with_topk(tk_heads[h], tau_votes, out_heads[h]);
+        }
+        // Détruire flux
+        for (size_t h=0; h<H; ++h) cudaStreamDestroy(streams[h]);
     }
 #endif
 

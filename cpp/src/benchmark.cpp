@@ -333,6 +333,31 @@ int main(int argc, char** argv) {
                           << ": Queried " << (Q*QBATCH) << " items in " << m_ms << " ms (" << ((Q*QBATCH) / (m_ms/1000.0)) << "/s), "
                           << "popcount_calls: " << popcnt_calls
                           << ", est_BitOPs_G: " << std::fixed << std::setprecision(3) << bitops_g << "\n";
+
+#ifdef DUDUX_ENABLE_CUDA
+                // Variante multi-stream (un flux par tête) utilisant les candidats
+                if (CAND > 0 && CAND < NITEMS) {
+                    dudux::core::metrics::reset();
+                    auto ms0 = clk::now();
+                    for (size_t b = 0; b < QBATCH; ++b) {
+                        for (auto& qstr : queries) {
+                            auto base = encode_string_bloom(qstr, NBIT);
+                            for (size_t h = 0; h < HEADS; ++h) q_heads[h] = base;
+                            const uint32_t tau = static_cast<uint32_t>((K + 1) / 2);
+                            auto cand = route_candidates(base, std::min(CAND, NITEMS));
+                            mha.attend_candidates_multistream(q_heads, K, tau, cand, out_heads);
+                        }
+                    }
+                    auto ms1 = clk::now();
+                    double ms_ms = std::chrono::duration<double, std::milli>(ms1 - ms0).count();
+                    const uint64_t popcnt_calls2 = dudux::core::metrics::popcount_calls();
+                    const double bitops_g2 = static_cast<double>(popcnt_calls2) * 64.0 / 1e9;
+                    std::cout << "MHA_multistream H=" << HEADS << ", VBIT=" << VBIT << ", K=" << K
+                              << ": Queried " << (Q*QBATCH) << " items in " << ms_ms << " ms (" << ((Q*QBATCH) / (ms_ms/1000.0)) << "/s), "
+                              << "popcount_calls: " << popcnt_calls2
+                              << ", est_BitOPs_G: " << std::fixed << std::setprecision(3) << bitops_g2 << "\n";
+                }
+#endif
             }
 
             // MHA masquée + K par tête (via attention masquée)

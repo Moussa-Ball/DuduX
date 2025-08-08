@@ -110,6 +110,13 @@ public:
     }
 
 #ifdef DUDUX_ENABLE_CUDA
+    // Vue en lecture seule des clés sur le device (utilisée pour exécuter des kernels custom côté MHA en multi-stream)
+    struct DeviceKeysView { const unsigned long long* d_keys; size_t words; size_t N; };
+    DeviceKeysView device_keys_view() const {
+        ensure_keys_on_device_();
+        return DeviceKeysView{ gpu_.d_keys, gpu_.words, keys_.size() };
+    }
+
     // Variante GPU avec flux CUDA explicite (nullptr => stream 0)
     void topk_into_stream(const dudux::core::BitVector& q, size_t k,
                           std::vector<std::pair<size_t, uint32_t>>& out,
