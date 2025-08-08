@@ -103,6 +103,7 @@ Tests inclus: bit‑ops, attention, MHA (concat), router, MLP, et test d’équi
 - `dudux_train_mlp_ste`: MLP 1 cachée (binaire 0/1) avec STE par couche.
   - Usage: `./build/dudux_train_mlp_ste D H N_train N_test epochs noise seed`
   - Exemple: `./build/dudux_train_mlp_ste 256 64 512 128 20 0.1 1`
+  - Option: exporter les poids binaires packés (uint64) en définissant `DUDUX_SAVE_MLP=/chemin/modele.dx1bmlp`
 
 Ces outils sont destinés aux smoke tests d’apprentissage binaire (forward strictement bitwise; backward via STE, avec mise à jour des poids « shadow »). Les poids binaires sont dérivés par seuillage dur (τ=0).
 

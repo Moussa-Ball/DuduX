@@ -3,6 +3,9 @@
 #include <random>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include "dudux/nn/mlp1b.hpp"
 #include "dudux/core/bitvector.hpp"
 
@@ -89,6 +92,41 @@ struct STEMLP1bTrainer {
         }
         rebin_upload_();
     }
+
+    // Sauvegarde des poids binaires packés (uint64) dans un fichier binaire.
+    // Format:
+    //  magic: 7 bytes "DX1BMLP" + 1 byte 0
+    //  uint64_t in, hidden, out, pack_bits=64
+    //  W1: hidden rows, chacun ceil(in/64) uint64
+    //  W2: out rows, chacun ceil(hidden/64) uint64
+    bool save_packed(const std::string& path) {
+        try {
+            std::ofstream ofs(path, std::ios::binary);
+            if (!ofs) return false;
+            char magic[8] = {'D','X','1','B','M','L','P','\0'};
+            ofs.write(magic, 8);
+            uint64_t in64=in, hid64=hidden, out64=out, pack=64;
+            ofs.write(reinterpret_cast<const char*>(&in64), sizeof(uint64_t));
+            ofs.write(reinterpret_cast<const char*>(&hid64), sizeof(uint64_t));
+            ofs.write(reinterpret_cast<const char*>(&out64), sizeof(uint64_t));
+            ofs.write(reinterpret_cast<const char*>(&pack), sizeof(uint64_t));
+            // W1
+            BitVector row(in);
+            size_t w1_words = (in + 63) / 64;
+            for (size_t h=0; h<hidden; ++h) {
+                for (size_t i=0;i<in;++i) row.set(i, w1_real[h*in + i] >= 0.0f);
+                ofs.write(reinterpret_cast<const char*>(row.data()), w1_words * sizeof(uint64_t));
+            }
+            // W2
+            BitVector row2(hidden);
+            size_t w2_words = (hidden + 63) / 64;
+            for (size_t o=0; o<out; ++o) {
+                for (size_t h=0; h<hidden; ++h) row2.set(h, w2_real[o*hidden + h] >= 0.0f);
+                ofs.write(reinterpret_cast<const char*>(row2.data()), w2_words * sizeof(uint64_t));
+            }
+            return true;
+        } catch (...) { return false; }
+    }
 };
 
 int main(int argc, char** argv) {
@@ -131,5 +169,10 @@ int main(int argc, char** argv) {
     }
     size_t correct=0; for (size_t i=0;i<NTE;++i) correct += (trainer.predict(Xte[i], TAU_OUT) == (yte[i]!=0));
     std::cout << "Test acc="<<(double)correct/NTE<<"\n";
+    // Sauvegarde optionnelle (env: DUDUX_SAVE_MLP)
+    if (const char* path = std::getenv("DUDUX_SAVE_MLP")) {
+        bool ok = trainer.save_packed(std::string(path));
+        std::cout << (ok ? "Saved packed weights to " : "Failed saving weights to ") << path << "\n";
+    }
     return 0;
 }
