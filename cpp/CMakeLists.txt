@@ -106,6 +106,10 @@ if (BUILD_TESTING)
   target_include_directories(dudux_train_mlp_ste PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(dudux_train_mlp_ste PRIVATE dudux_core)
 
+  # Smoke test for MLP STE trainer (small run to verify it executes)
+  add_test(NAME dudux_train_mlp_ste_smoke
+           COMMAND dudux_train_mlp_ste 64 16 64 32 2 0.1 1)
+
   option(DUDUX_ENABLE_PERF_TEST "Enable perf smoke test" OFF)
   if (DUDUX_ENABLE_PERF_TEST)
     add_test(NAME dudux_perf_smoke COMMAND dudux_perf)

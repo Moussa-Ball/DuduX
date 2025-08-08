@@ -41,7 +41,7 @@ struct STEPerceptron1b {
         if (err != 0) {
             const size_t words = (in_features + 63) / 64;
             const uint64_t *w = x.data();
-            for (size_t wi=0, bit=0; wi<words; ++wi) {
+            for (size_t wi=0; wi<words; ++wi) {
                 uint64_t xx = w[wi];
                 while (xx) {
                     unsigned long long t = xx & -xx;
