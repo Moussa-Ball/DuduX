@@ -23,6 +23,17 @@ public:
         if (H_ == 0) throw std::invalid_argument("MHA1b: heads must be > 0");
     }
 
+#ifdef DUDUX_ENABLE_CUDA
+    ~NanoMultiHeadAttention1b() {
+        if (streams_ready_) {
+            for (auto s : streams_) if (s) cudaStreamDestroy(s);
+            streams_.clear();
+            streams_ready_ = false;
+            streams_H_cached_ = 0;
+        }
+    }
+#endif
+
     size_t heads() const noexcept { return H_; }
     size_t key_bits() const noexcept { return att_.key_bits(); }
     size_t value_bits() const noexcept { return att_.value_bits(); }
@@ -90,22 +101,18 @@ public:
         if (q_heads.size() != H_) throw std::invalid_argument("MHA1b: q_heads size != heads");
         out_heads.resize(H_);
         const size_t H = H_;
-        // Créer H flux
-        std::vector<cudaStream_t> streams(H);
-        for (size_t h=0; h<H; ++h) cudaStreamCreateWithFlags(&streams[h], cudaStreamNonBlocking);
+        ensure_streams_();
         // Lancer top-k candidats par tête en parallèle
         std::vector<std::vector<std::pair<size_t,uint32_t>>> tk_heads(H);
         for (size_t h=0; h<H; ++h) {
             tk_heads[h].clear();
-            att_.topk_into_candidates_stream(q_heads[h], k, candidates, tk_heads[h], (void*)streams[h]);
+            att_.topk_into_candidates_stream(q_heads[h], k, candidates, tk_heads[h], (void*)streams_[h]);
         }
         // Synchroniser flux et agréger
-        for (size_t h=0; h<H; ++h) cudaStreamSynchronize(streams[h]);
+        for (size_t h=0; h<H; ++h) cudaStreamSynchronize(streams_[h]);
         for (size_t h=0; h<H; ++h) {
             att_.attend_with_topk(tk_heads[h], tau_votes, out_heads[h]);
         }
-        // Détruire flux
-        for (size_t h=0; h<H; ++h) cudaStreamDestroy(streams[h]);
     }
 #endif
 
@@ -126,6 +133,25 @@ public:
 private:
     size_t H_;
     NanoAttention1b att_; // K/V partagés
+#ifdef DUDUX_ENABLE_CUDA
+    // Pool de streams CUDA persistants (créés à la demande)
+    mutable std::vector<cudaStream_t> streams_{};
+    mutable bool streams_ready_ = false;
+    mutable size_t streams_H_cached_ = 0;
+    void ensure_streams_() const {
+        if (!streams_ready_ || streams_H_cached_ != H_) {
+            // Détruire existants si la taille change
+            if (!streams_.empty()) {
+                for (auto s : streams_) if (s) cudaStreamDestroy(s);
+                streams_.clear();
+            }
+            streams_.resize(H_);
+            for (size_t h=0; h<H_; ++h) cudaStreamCreateWithFlags(&streams_[h], cudaStreamNonBlocking);
+            streams_ready_ = true;
+            streams_H_cached_ = H_;
+        }
+    }
+#endif
 };
 
 }} // namespace dudux::nn

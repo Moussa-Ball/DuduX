@@ -29,7 +29,9 @@ if (DUDUX_ENABLE_CUDA)
   set_target_properties(cudux_gpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
   # Allow setting arch externally: -DCMAKE_CUDA_ARCHITECTURES=75
   if (NOT CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES native)
+  # Default to a broad baseline if not specified; override with -DCMAKE_CUDA_ARCHITECTURES=XX
+  # Examples: 61 (Pascal), 70 (Volta), 75 (Turing), 86 (Ampere)
+  set(CMAKE_CUDA_ARCHITECTURES 75)
   endif()
 endif()
 
@@ -86,6 +88,14 @@ if (BUILD_TESTING)
   target_include_directories(dudux_mha_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(dudux_mha_tests PRIVATE dudux_core)
   add_test(NAME dudux_mha_tests COMMAND dudux_mha_tests)
+
+  add_executable(dudux_mha_multistream_tests tests/test_mha_multistream.cpp)
+  target_include_directories(dudux_mha_multistream_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(dudux_mha_multistream_tests PRIVATE dudux_core)
+  if (DUDUX_ENABLE_CUDA)
+    target_link_libraries(dudux_mha_multistream_tests PRIVATE cudux_gpu)
+  endif()
+  add_test(NAME dudux_mha_multistream_tests COMMAND dudux_mha_multistream_tests)
 
   option(DUDUX_ENABLE_PERF_TEST "Enable perf smoke test" OFF)
   if (DUDUX_ENABLE_PERF_TEST)

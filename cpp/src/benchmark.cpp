@@ -47,6 +47,9 @@ using clk = std::chrono::high_resolution_clock;
 #ifndef DUDUX_BENCHDEF_CAND
 #define DUDUX_BENCHDEF_CAND 0 /* 0 => full set (no gating) */
 #endif
+#ifndef DUDUX_BENCHDEF_MS
+#define DUDUX_BENCHDEF_MS 0 /* 0 => multistream off by default */
+#endif
 
 static std::vector<size_t> parse_klist(const std::string& s) {
     std::vector<size_t> ks;
@@ -77,8 +80,9 @@ int main(int argc, char** argv) {
     size_t QBATCH = DUDUX_BENCHDEF_QBATCH;
     size_t HEADS = DUDUX_BENCHDEF_HEADS;
     size_t CAND = DUDUX_BENCHDEF_CAND;
+    int MULTISTREAM = DUDUX_BENCHDEF_MS;
 
-    // Optional CLI overrides: NBIT NITEMS Q M KLIST (comma-separated) VBIT METRICS(0/1) QBATCH HEADS KH_LIST CAND
+    // Optional CLI overrides: NBIT NITEMS Q M KLIST (comma-separated) VBIT METRICS(0/1) QBATCH HEADS KH_LIST CAND MULTISTREAM(0/1)
     if (argc >= 2) NBIT = static_cast<size_t>(std::stoull(argv[1]));
     if (argc >= 3) NITEMS = static_cast<size_t>(std::stoull(argv[2]));
     if (argc >= 4) Q = static_cast<size_t>(std::stoull(argv[3]));
@@ -148,6 +152,7 @@ int main(int argc, char** argv) {
     std::vector<size_t> KHs;
     if (argc >= 11) KHs = parse_klist(argv[10]);
     if (argc >= 12) CAND = static_cast<size_t>(std::stoull(argv[11]));
+    if (argc >= 13) MULTISTREAM = std::atoi(argv[12]);
     dudux::core::metrics::enable(metrics_on);
     std::cout << "metrics_enabled: " << (metrics_on ? 1 : 0)
 #ifdef DUDUX_ENABLE_METRICS
@@ -166,6 +171,12 @@ int main(int argc, char** argv) {
     std::cout << "CAND (candidates per query per head): ";
     if (CAND == 0) std::cout << "ALL (no gating)"; else std::cout << CAND;
     std::cout << "\n";
+    std::cout << "MHA multistream: "
+#ifdef DUDUX_ENABLE_CUDA
+              << (MULTISTREAM ? "ON" : "OFF") << "\n";
+#else
+              << "OFF (CUDA disabled)\n";
+#endif
     for (size_t K : Ks) {
         dudux::core::metrics::reset();
         auto r0 = clk::now();
@@ -336,7 +347,7 @@ int main(int argc, char** argv) {
 
 #ifdef DUDUX_ENABLE_CUDA
                 // Variante multi-stream (un flux par tête) utilisant les candidats
-                if (CAND > 0 && CAND < NITEMS) {
+                if (MULTISTREAM && CAND > 0 && CAND < NITEMS) {
                     dudux::core::metrics::reset();
                     auto ms0 = clk::now();
                     for (size_t b = 0; b < QBATCH; ++b) {
