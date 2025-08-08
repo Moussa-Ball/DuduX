@@ -115,4 +115,8 @@ if (BUILD_TESTING)
     add_test(NAME dudux_perf_smoke COMMAND dudux_perf)
     set_tests_properties(dudux_perf_smoke PROPERTIES LABELS "perf")
   endif()
+
+  # Small tool to check packed MLP files
+  add_executable(dudux_check_packed_mlp tools/check_packed_mlp.cpp)
+  # Optional: we could add an end-to-end export+check test later.
 endif()

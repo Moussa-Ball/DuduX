@@ -107,6 +107,9 @@ Tests inclus: bit‑ops, attention, MHA (concat), router, MLP, et test d’équi
 
 Ces outils sont destinés aux smoke tests d’apprentissage binaire (forward strictement bitwise; backward via STE, avec mise à jour des poids « shadow »). Les poids binaires sont dérivés par seuillage dur (τ=0).
 
+Outil de vérification:
+- `dudux_check_packed_mlp /chemin/modele.dx1bmlp IN H OUT` vérifie le fichier (magic, dimensions, taille attendue).
+
 ## API (aperçu)
 - `NanoAttention1b`:
   - `topk_into(q, k, out)` / `topk_into_candidates(...)` (+ versions stream CUDA)
