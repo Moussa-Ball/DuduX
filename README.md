@@ -96,6 +96,16 @@ ctest --test-dir build -V
 
 Tests inclus: bit‑ops, attention, MHA (concat), router, MLP, et test d’équivalence multistream (si CUDA).
 
+## Entraînement (STE binaire)
+- `dudux_train_ste`: perceptron binaire (0/1) avec poids « shadow » float32 et STE.
+  - Usage: `./build/dudux_train_ste N D N_train N_test noise seed`
+  - Exemple: `./build/dudux_train_ste 1024 400 200 6 0.2 1`
+- `dudux_train_mlp_ste`: MLP 1 cachée (binaire 0/1) avec STE par couche.
+  - Usage: `./build/dudux_train_mlp_ste D H N_train N_test epochs noise seed`
+  - Exemple: `./build/dudux_train_mlp_ste 256 64 512 128 20 0.1 1`
+
+Ces outils sont destinés aux smoke tests d’apprentissage binaire (forward strictement bitwise; backward via STE, avec mise à jour des poids « shadow »). Les poids binaires sont dérivés par seuillage dur (τ=0).
+
 ## API (aperçu)
 - `NanoAttention1b`:
   - `topk_into(q, k, out)` / `topk_into_candidates(...)` (+ versions stream CUDA)
