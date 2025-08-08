@@ -65,5 +65,11 @@ int main(){
     // bit1: v0=0, v1=1 (2), v2=0 -> w1=2; tau_weight=3 -> 0
     assert(out.get(1)==false);
 
+    // Masquage: exclure k0 (mask[0]=0) et causal val_upto=1
+    std::vector<uint8_t> mask = {0,1,1,1};
+    att.attend_masked(q, 3, 1, &mask, 1, out);
+    // Sans k0, top viennent de k1/k2 => out bit0 = 1 via v1/v2
+    assert(out.get(0)==true);
+
     return 0;
 }

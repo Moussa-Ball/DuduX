@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(DUDUX_ENABLE_NATIVE "Enable -march=native" ON)
 option(DUDUX_ENABLE_METRICS "Enable runtime metrics (popcount counters)" ON)
+option(DUDUX_ENABLE_CUDA "Build optional CUDA backend (GPU kernels)" OFF)
 if(DUDUX_ENABLE_NATIVE)
   if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-O3 -DNDEBUG -march=native -mtune=native -Wall -Wextra -Wpedantic)
@@ -20,14 +21,32 @@ endif()
 add_library(dudux_core INTERFACE)
  target_include_directories(dudux_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Optional CUDA backend
+if (DUDUX_ENABLE_CUDA)
+  enable_language(CUDA)
+  add_library(cudux_gpu STATIC src/gpu/attention1b.cu)
+  target_include_directories(cudux_gpu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  set_target_properties(cudux_gpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+  # Allow setting arch externally: -DCMAKE_CUDA_ARCHITECTURES=75
+  if (NOT CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES native)
+  endif()
+endif()
+
 add_executable(dudux src/main.cpp)
  target_include_directories(dudux PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
  target_link_libraries(dudux PRIVATE dudux_core)
+ if (DUDUX_ENABLE_CUDA)
+   target_link_libraries(dudux PRIVATE cudux_gpu)
+ endif()
 
 # Benchmark executable
 add_executable(dudux_perf src/benchmark.cpp)
  target_include_directories(dudux_perf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
  target_link_libraries(dudux_perf PRIVATE dudux_core)
+ if (DUDUX_ENABLE_CUDA)
+   target_link_libraries(dudux_perf PRIVATE cudux_gpu)
+ endif()
  # Benchmark defaults configurable via CMake cache variables (numeric/string)
  # (Optional) You can set runtime args; compile-time defaults are defined in source.
 
@@ -62,6 +81,11 @@ if (BUILD_TESTING)
   target_include_directories(dudux_attention_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(dudux_attention_tests PRIVATE dudux_core)
   add_test(NAME dudux_attention_tests COMMAND dudux_attention_tests)
+
+  add_executable(dudux_mha_tests tests/test_mha.cpp)
+  target_include_directories(dudux_mha_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(dudux_mha_tests PRIVATE dudux_core)
+  add_test(NAME dudux_mha_tests COMMAND dudux_mha_tests)
 
   option(DUDUX_ENABLE_PERF_TEST "Enable perf smoke test" OFF)
   if (DUDUX_ENABLE_PERF_TEST)
