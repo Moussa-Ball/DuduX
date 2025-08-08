@@ -64,6 +64,23 @@ public:
         }
     }
 
+#ifdef DUDUX_ENABLE_CUDA
+    // Variante stream: permet de passer un flux CUDA (p.ex. un flux par tête)
+    void attend_candidates_stream(const std::vector<dudux::core::BitVector>& q_heads, size_t k, uint32_t tau_votes,
+                                  const std::vector<size_t>& candidates,
+                                  std::vector<dudux::core::BitVector>& out_heads,
+                                  void* stream_handle) const {
+        if (q_heads.size() != H_) throw std::invalid_argument("MHA1b: q_heads size != heads");
+        out_heads.resize(H_);
+        std::vector<std::pair<size_t,uint32_t>> tk;
+        for (size_t h = 0; h < H_; ++h) {
+            tk.clear();
+            att_.topk_into_candidates_stream(q_heads[h], k, candidates, tk, stream_handle);
+            att_.attend_with_topk(tk, tau_votes, out_heads[h]);
+        }
+    }
+#endif
+
     // Concatène les sorties des H têtes dans un BitVector de taille H*value_bits
     void attend_concat(const std::vector<dudux::core::BitVector>& q_heads, size_t k, uint32_t tau_votes,
                        dudux::core::BitVector& out_concat) const {

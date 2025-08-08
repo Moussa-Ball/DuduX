@@ -75,23 +75,8 @@ public:
         out.clear();
         if (k == 0 || keys_.empty()) return;
 #ifdef DUDUX_ENABLE_CUDA
-    // GPU path: persistent keys + scratch buffers; upload only q; compute full scores; sort and take k
-    ensure_keys_on_device_();
-    const size_t words = gpu_.words;
-    const size_t N = keys_.size();
-    ensure_scratch_on_device_((int)N, (int)N);
-    cudaMemcpy(gpu_.d_q, q.data(), words * sizeof(unsigned long long), cudaMemcpyHostToDevice);
-    int block=256; int grid=(int)((N + block - 1)/block);
-    dudux_and_popcount_scores<<<grid,block,0,0>>>(gpu_.d_q, gpu_.d_keys, (int)N, (int)words, gpu_.d_scores);
-    dudux_topk_scores(gpu_.d_scores, gpu_.d_idx, (int)N, (int)k, 0);
-    const size_t kk = std::min(k,N);
-    std::vector<unsigned int> h_scores(kk); std::vector<int> h_idx(kk);
-    cudaMemcpyAsync(h_scores.data(), gpu_.d_scores, kk*sizeof(unsigned int), cudaMemcpyDeviceToHost, 0);
-    cudaMemcpyAsync(h_idx.data(),    gpu_.d_idx,    kk*sizeof(int),         cudaMemcpyDeviceToHost, 0);
-    cudaStreamSynchronize(0);
-    out.clear(); out.reserve(std::min(k,N));
-    for (size_t i=0;i<kk;++i) out.emplace_back((size_t)h_idx[i], (uint32_t)h_scores[i]);
-    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b){ if (a.second != b.second) return a.second > b.second; return a.first < b.first; });
+    // Délègue à la version stream (flux par défaut 0)
+    topk_into_stream(q, k, out, nullptr);
     return;
 #endif
         struct Entry { uint32_t s; size_t idx; };
@@ -123,6 +108,31 @@ public:
         for (size_t i = out.size(); i-- > 0;) { auto e = heap.top(); heap.pop(); out[i] = {e.idx, e.s}; }
         std::sort(out.begin(), out.end(), [](const auto& a, const auto& b){ if (a.second != b.second) return a.second > b.second; return a.first < b.first; });
     }
+
+#ifdef DUDUX_ENABLE_CUDA
+    // Variante GPU avec flux CUDA explicite (nullptr => stream 0)
+    void topk_into_stream(const dudux::core::BitVector& q, size_t k,
+                          std::vector<std::pair<size_t, uint32_t>>& out,
+                          void* stream_handle) const {
+        cudaStream_t stream = stream_handle ? reinterpret_cast<cudaStream_t>(stream_handle) : 0;
+        ensure_keys_on_device_();
+        const size_t words = gpu_.words;
+        const size_t N = keys_.size();
+        ensure_scratch_on_device_((int)N, (int)N);
+        cudaMemcpyAsync(gpu_.d_q, q.data(), words * sizeof(unsigned long long), cudaMemcpyHostToDevice, stream);
+        int block=256; int grid=(int)((N + block - 1)/block);
+        dudux_and_popcount_scores<<<grid,block,0,stream>>>(gpu_.d_q, gpu_.d_keys, (int)N, (int)words, gpu_.d_scores);
+        dudux_topk_scores(gpu_.d_scores, gpu_.d_idx, (int)N, (int)k, stream);
+        const size_t kk = std::min(k,N);
+        std::vector<unsigned int> h_scores(kk); std::vector<int> h_idx(kk);
+        cudaMemcpyAsync(h_scores.data(), gpu_.d_scores, kk*sizeof(unsigned int), cudaMemcpyDeviceToHost, stream);
+        cudaMemcpyAsync(h_idx.data(),    gpu_.d_idx,    kk*sizeof(int),         cudaMemcpyDeviceToHost, stream);
+        cudaStreamSynchronize(stream);
+        out.clear(); out.reserve(std::min(k,N));
+        for (size_t i=0;i<kk;++i) out.emplace_back((size_t)h_idx[i], (uint32_t)h_scores[i]);
+        std::sort(out.begin(), out.end(), [](const auto& a, const auto& b){ if (a.second != b.second) return a.second > b.second; return a.first < b.first; });
+    }
+#endif
 
     // Variante masquée: 'mask' optionnel (mask[i]==0 -> ignorer), et 'valid_upto' pour causal (exclure i>valid_upto)
     void topk_into_masked(const dudux::core::BitVector& q, size_t k,
@@ -168,24 +178,8 @@ public:
         out.clear();
         if (k == 0 || keys_.empty() || candidates.empty()) return;
 #ifdef DUDUX_ENABLE_CUDA
-    ensure_keys_on_device_();
-    const size_t words = gpu_.words;
-    const size_t N = candidates.size();
-    ensure_scratch_on_device_((int)N, (int)keys_.size());
-    cudaMemcpy(gpu_.d_q, q.data(), words * sizeof(unsigned long long), cudaMemcpyHostToDevice);
-    std::vector<int> h_cand(N); for (size_t j=0;j<N;++j) { size_t gi=candidates[j]; if (gi>=keys_.size()) throw std::out_of_range("candidate index out of range"); h_cand[j]=(int)gi; }
-    cudaMemcpy(gpu_.d_cand, h_cand.data(), N*sizeof(int), cudaMemcpyHostToDevice);
-    int block=256; int grid=(int)((N + block - 1)/block);
-    dudux_and_popcount_scores_indexed<<<grid,block,0,0>>>(gpu_.d_q, gpu_.d_keys, gpu_.d_cand, (int)N, (int)words, gpu_.d_scores);
-    dudux_topk_scores(gpu_.d_scores, gpu_.d_idx, (int)N, (int)k, 0);
-    const size_t kk = std::min(k,N);
-    std::vector<unsigned int> h_scores(kk); std::vector<int> h_loc(kk);
-    cudaMemcpyAsync(h_scores.data(), gpu_.d_scores, kk*sizeof(unsigned int), cudaMemcpyDeviceToHost, 0);
-    cudaMemcpyAsync(h_loc.data(),    gpu_.d_idx,    kk*sizeof(int),         cudaMemcpyDeviceToHost, 0);
-    cudaStreamSynchronize(0);
-    out.clear(); out.reserve(std::min(k,N));
-    for (size_t r=0;r<kk;++r) { size_t local=(size_t)h_loc[r]; out.emplace_back(candidates[local], (uint32_t)h_scores[r]); }
-    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b){ if (a.second != b.second) return a.second > b.second; return a.first < b.first; });
+    // Délègue à la version stream (flux par défaut 0)
+    topk_into_candidates_stream(q, k, candidates, out, nullptr);
     return;
 #else
         struct Entry { uint32_t s; size_t idx; };
@@ -207,6 +201,35 @@ public:
         std::sort(out.begin(), out.end(), [](const auto& a, const auto& b){ if (a.second != b.second) return a.second > b.second; return a.first < b.first; });
 #endif
     }
+
+#ifdef DUDUX_ENABLE_CUDA
+    // Variante GPU (candidats) avec flux CUDA explicite
+    void topk_into_candidates_stream(const dudux::core::BitVector& q, size_t k,
+                                     const std::vector<size_t>& candidates,
+                                     std::vector<std::pair<size_t, uint32_t>>& out,
+                                     void* stream_handle) const {
+        cudaStream_t stream = stream_handle ? reinterpret_cast<cudaStream_t>(stream_handle) : 0;
+        ensure_keys_on_device_();
+        const size_t words = gpu_.words;
+        const size_t N = candidates.size();
+        ensure_scratch_on_device_((int)N, (int)keys_.size());
+        cudaMemcpyAsync(gpu_.d_q, q.data(), words * sizeof(unsigned long long), cudaMemcpyHostToDevice, stream);
+        std::vector<int> h_cand(N);
+        for (size_t j=0;j<N;++j) { size_t gi=candidates[j]; if (gi>=keys_.size()) throw std::out_of_range("candidate index out of range"); h_cand[j]=(int)gi; }
+        cudaMemcpyAsync(gpu_.d_cand, h_cand.data(), N*sizeof(int), cudaMemcpyHostToDevice, stream);
+        int block=256; int grid=(int)((N + block - 1)/block);
+        dudux_and_popcount_scores_indexed<<<grid,block,0,stream>>>(gpu_.d_q, gpu_.d_keys, gpu_.d_cand, (int)N, (int)words, gpu_.d_scores);
+        dudux_topk_scores(gpu_.d_scores, gpu_.d_idx, (int)N, (int)k, stream);
+        const size_t kk = std::min(k,N);
+        std::vector<unsigned int> h_scores(kk); std::vector<int> h_loc(kk);
+        cudaMemcpyAsync(h_scores.data(), gpu_.d_scores, kk*sizeof(unsigned int), cudaMemcpyDeviceToHost, stream);
+        cudaMemcpyAsync(h_loc.data(),    gpu_.d_idx,    kk*sizeof(int),         cudaMemcpyDeviceToHost, stream);
+        cudaStreamSynchronize(stream);
+        out.clear(); out.reserve(std::min(k,N));
+        for (size_t r=0;r<kk;++r) { size_t local=(size_t)h_loc[r]; out.emplace_back(candidates[local], (uint32_t)h_scores[r]); }
+        std::sort(out.begin(), out.end(), [](const auto& a, const auto& b){ if (a.second != b.second) return a.second > b.second; return a.first < b.first; });
+    }
+#endif
 
     // Attention: retourne une valeur agrégée par majorité sur les top-k (τ: seuil en votes pour bit=1)
     void attend(const dudux::core::BitVector& q, size_t k, uint32_t tau_votes, dudux::core::BitVector& out_value) const {
