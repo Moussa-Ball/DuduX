@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Configure (CPU only)
+        run: cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release -DDUDUX_ENABLE_CUDA=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run tests
+        run: ctest --test-dir build -V
+
+      - name: Bench smoke (optional)
+        run: ./build/dudux_perf 1024 200 10 2 3,5 256 0 1 2 0 0 || true
