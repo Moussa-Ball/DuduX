@@ -97,6 +97,11 @@ if (BUILD_TESTING)
   endif()
   add_test(NAME dudux_mha_multistream_tests COMMAND dudux_mha_multistream_tests)
 
+  # Training sample (not a test by default)
+  add_executable(dudux_train_ste src/train_ste.cpp)
+  target_include_directories(dudux_train_ste PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(dudux_train_ste PRIVATE dudux_core)
+
   option(DUDUX_ENABLE_PERF_TEST "Enable perf smoke test" OFF)
   if (DUDUX_ENABLE_PERF_TEST)
     add_test(NAME dudux_perf_smoke COMMAND dudux_perf)
