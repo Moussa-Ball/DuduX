@@ -1,1 +1,75 @@
-venv/
+# Global
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.log
+
+# Editors/IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+.env/
+.env.*
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.lo
+*.la
+*.al
+*.libs
+*.out
+*.app
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.dSYM/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+
+# Build directories
+/build/
+**/build/
+/bin/
+/lib/
+/dist/
+/out/
+
+# Coverage / Sanitizers
+*.gcda
+*.gcno
+*.gcov
+*.lcov
+sanitizer*.log
+
+# Generated docs
+/site/
+/docs/_build/
+
+# Misc
+.cache/
+.tmp/
